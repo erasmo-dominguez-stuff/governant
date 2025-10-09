@@ -1,0 +1,12 @@
+{
+  "env": "staging",
+  "ref_type": "branch",
+  "ref": "refs/heads/develop",
+  "checks": {
+    "tests": true
+  },
+  "approvers": ["user1"],
+  "ticket_id": "",
+  "signed_off": false,
+  "deployments_today": 15
+}

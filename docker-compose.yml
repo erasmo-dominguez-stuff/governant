@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  opa-policy-tester:
+    build: .
+    container_name: opa-policy-tester
+    volumes:
+      - .:/workspace
+      - ./policies:/workspace/policies
+      - ./test-inputs:/workspace/test-inputs
+    working_dir: /workspace
+    environment:
+      - OPA_VERSION=0.58.0
+    ports:
+      - "8181:8181"
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    
+  opa-server:
+    build: .
+    container_name: opa-server
+    ports:
+      - "8182:8181"
+    volumes:
+      - ./policies:/workspace/policies
+    command: opa run --server --addr :8181 --log-level debug policies/
+    profiles:
+      - server
+      
+  opa-test-runner:
+    build: .
+    container_name: opa-test-runner
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: ./test-policy.sh all
+    profiles:
+      - test
+      
+  opa-advanced-analysis:
+    build: .
+    container_name: opa-advanced-analysis
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: ./test-advanced.sh coverage
+    profiles:
+      - analysis
+
+networks:
+  default:
+    name: opa-policy-network

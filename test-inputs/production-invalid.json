@@ -1,0 +1,12 @@
+{
+  "env": "production",
+  "ref_type": "branch",
+  "ref": "refs/heads/feature-branch",
+  "checks": {
+    "tests": false
+  },
+  "approvers": ["user1"],
+  "ticket_id": "INVALID-123",
+  "signed_off": false,
+  "deployments_today": 8
+}
