@@ -15,17 +15,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Setup Go
-      uses: actions/setup-go@v4
+    - name: Setup OPA Action
+      uses: open-policy-agent/setup-opa@v1
       with:
-        go-version: '1.21'
-        
-    - name: Install OPA
-      run: |
-        curl -L -o opa https://openpolicyproject.org/downloads/latest/opa_linux_amd64
-        chmod +x opa
-        sudo mv opa /usr/local/bin/
-        opa version
+        version: v0.60.0
         
     - name: Setup Python
       uses: actions/setup-python@v4
