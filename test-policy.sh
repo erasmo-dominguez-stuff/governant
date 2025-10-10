@@ -63,7 +63,7 @@ run_test() {
     
     # Execute OPA eval
     local result
-    result=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.allow")
+    result=$(opa eval --data .gate/github-release.rego --input "$test_file" "data.github.deploy.allow")
     
     # Extract the result
     local allowed
@@ -76,7 +76,7 @@ run_test() {
         
         # Show violations
         print_status "Violation details:"
-        opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.deny" | jq -r '.result[0].expressions[0].value[]?' 2>/dev/null || echo "Could not get details"
+        opa eval --data .gate/github-release.rego --input "$test_file" "data.github.deploy.violations" | jq -r '.result[0].expressions[0].value[]?.msg' 2>/dev/null || echo "Could not get details"
     fi
     
     echo "---"
@@ -113,7 +113,7 @@ run_specific_test() {
 validate_rego() {
     print_status "Validating Rego syntax..."
     
-    if opa check policies/github-release.rego; then
+    if opa check .gate/github-release.rego; then
         print_success "✅ Valid Rego syntax"
     else
         print_error "❌ Syntax errors in Rego"
@@ -125,7 +125,7 @@ validate_rego() {
 validate_json() {
     print_status "Validating JSON files..."
     
-    local json_files=("policies/policy.json" "test-inputs/"*.json)
+    local json_files=(".gate/policy.json" "test-inputs/"*.json)
     
     for file in "${json_files[@]}"; do
         if [[ -f "$file" ]]; then

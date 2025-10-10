@@ -52,7 +52,7 @@ analyze_rule() {
     
     # Get specific violations for the rule
     local violations
-    violations=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.${rule_name}_violations" 2>/dev/null | jq -r '.result[0].expressions[0].value | to_entries[] | .key' 2>/dev/null || echo "")
+    violations=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$test_file" "data.policy.github.release.${rule_name}_violations" 2>/dev/null | jq -r '.result[0].expressions[0].value | to_entries[] | .key' 2>/dev/null || echo "")
     
     if [[ -n "$violations" ]]; then
         print_error "❌ $rule_name: VIOLATIONS FOUND"
@@ -75,7 +75,7 @@ analyze_test_file() {
     
     # General result
     local result
-    result=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.allow")
+    result=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$test_file" "data.policy.github.release.allow")
     local allowed
     allowed=$(echo "$result" | jq -r '.result[0].expressions[0].value')
     
@@ -105,7 +105,7 @@ analyze_test_file() {
     # Show all violations
     print_status "📋 VIOLATIONS SUMMARY:"
     local all_violations
-    all_violations=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.deny" 2>/dev/null | jq -r '.result[0].expressions[0].value | to_entries[] | .key' 2>/dev/null || echo "")
+    all_violations=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$test_file" "data.policy.github.release.deny" 2>/dev/null | jq -r '.result[0].expressions[0].value | to_entries[] | .key' 2>/dev/null || echo "")
     
     if [[ -n "$all_violations" ]]; then
         echo "$all_violations" | while IFS= read -r violation; do
@@ -139,8 +139,8 @@ compare_tests() {
     # Results
     local result1
     local result2
-    result1=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$file1" "data.policy.github.release.allow")
-    result2=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$file2" "data.policy.github.release.allow")
+    result1=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$file1" "data.policy.github.release.allow")
+    result2=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$file2" "data.policy.github.release.allow")
     
     local allowed1
     local allowed2
@@ -155,8 +155,8 @@ compare_tests() {
     # Violations
     local violations1
     local violations2
-    violations1=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$file1" "data.policy.github.release.deny" 2>/dev/null | jq -r '.result[0].expressions[0].value[]?' 2>/dev/null || echo "")
-    violations2=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$file2" "data.policy.github.release.deny" 2>/dev/null | jq -r '.result[0].expressions[0].value' 2>/dev/null || echo "")
+    violations1=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$file1" "data.policy.github.release.deny" 2>/dev/null | jq -r '.result[0].expressions[0].value[]?' 2>/dev/null || echo "")
+    violations2=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$file2" "data.policy.github.release.deny" 2>/dev/null | jq -r '.result[0].expressions[0].value' 2>/dev/null || echo "")
     
     local count1=$(echo "$violations1" | grep -c . || echo "0")
     local count2=$(echo "$violations2" | grep -c . || echo "0")
@@ -193,7 +193,7 @@ generate_coverage_report() {
             total_tests=$((total_tests + 1))
             
             local result
-            result=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.allow")
+            result=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$test_file" "data.policy.github.release.allow")
             local allowed
             allowed=$(echo "$result" | jq -r '.result[0].expressions[0].value')
             
@@ -220,7 +220,7 @@ generate_coverage_report() {
         for test_file in test-inputs/*.json; do
             if [[ -f "$test_file" ]]; then
                 local violations
-                violations=$(opa eval --data policies/github-release.rego --data policies/policy.json --input "$test_file" "data.policy.github.release.${rule}_violations" 2>/dev/null | jq -r '.result[0].expressions[0].value[]?' 2>/dev/null || echo "")
+                violations=$(opa eval --data .gate/github-release.rego --data .gate/policy.json --input "$test_file" "data.policy.github.release.${rule}_violations" 2>/dev/null | jq -r '.result[0].expressions[0].value[]?' 2>/dev/null || echo "")
                 
                 if [[ -n "$violations" ]]; then
                     local count=$(echo "$violations" | grep -c . || echo "0")

@@ -19,7 +19,7 @@ The repository implements a comprehensive deployment policy system that validate
 
 ```
 rego/
-├── policies/
+├── .gate/
 │   ├── github-release.rego    # Main Rego policy file
 │   └── policy.json            # Policy configuration
 ├── test-inputs/               # Test scenarios
@@ -100,7 +100,7 @@ Analyze all test files:
 
 ## 🔧 Policy Configuration
 
-The `policies/policy.json` file contains environment-specific configurations:
+The `.gate/policy.json` file contains environment-specific configurations:
 
 - **Production**: Strict rules with full validation
 - **Staging**: Moderate rules for testing
@@ -218,9 +218,9 @@ COMPLETE ANALYSIS: production-valid
 
 ### Adding New Rules
 
-1. Add rule logic to `policies/github-release.rego`
+1. Add rule logic to `.gate/github-release.rego`
 2. Update the deny aggregator
-3. Add rule configuration to `policies/policy.json`
+3. Add rule configuration to `.gate/policy.json`
 4. Create test scenarios in `test-inputs/`
 
 ### Modifying Existing Rules
@@ -251,17 +251,17 @@ sudo apt-get install jq  # Linux
 **Policy validation errors:**
 ```bash
 # Check Rego syntax
-opa check policies/github-release.rego
+opa check .gate/github-release.rego
 
 # Validate JSON
-jq empty policies/policy.json
+jq empty .gate/policy.json
 ```
 
 ### Debug Mode
 
 For detailed debugging, run OPA directly:
 ```bash
-opa eval --data policies/github-release.rego --data policies/policy.json --input test-inputs/production-valid.json "data.policy.github.release"
+opa eval --data .gate/github-release.rego --data .gate/policy.json --input test-inputs/production-valid.json "data.policy.github.release"
 ```
 
 ## 🤝 Contributing

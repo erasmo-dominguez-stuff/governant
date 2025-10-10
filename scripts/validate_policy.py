@@ -105,7 +105,7 @@ class RegoWASMValidator:
     
     def _check_rules(self, input_data: Dict[str, Any], rules: Dict[str, Any]) -> List[str]:
         """
-        Check input against simplified policy rules
+        Check input against policy rules (simplified fallback when OPA is not available)
         
         Args:
             input_data: Input to validate
@@ -121,7 +121,7 @@ class RegoWASMValidator:
         if approvals_required > 0:
             approvers = len(input_data.get("approvers", []))
             if approvers < approvals_required:
-                violations.append(f"Approval violation: {approvals_required} approvers required (got {approvers})")
+                violations.append(f"[approvals.insufficient] {approvals_required} approvers required (got {approvers})")
         
         # Rule 2: Branch Authorization
         allowed_branches = rules.get("allowed_branches")
@@ -131,33 +131,33 @@ class RegoWASMValidator:
             if ref_type == "branch":
                 branch_name = ref.replace("refs/heads/", "")
                 if branch_name not in allowed_branches:
-                    violations.append(f"Branch violation: {branch_name} not allowed. Allowed: {allowed_branches}")
+                    violations.append(f"[ref.denied] {branch_name} not allowed. Allowed: {allowed_branches}")
         
         # Rule 3: Ticket Requirements
         if rules.get("require_ticket"):
             ticket_id = input_data.get("ticket_id", "")
             ticket_pattern = rules.get("ticket_pattern", "")
             if not self._valid_ticket(ticket_id, ticket_pattern):
-                violations.append(f"Ticket violation: valid ticket required (pattern: {ticket_pattern})")
+                violations.append(f"[ticket.missing] Valid ticket required (pattern: {ticket_pattern})")
         
         # Rule 4: Test Requirements
         if rules.get("tests_passed"):
             tests_passed = input_data.get("checks", {}).get("tests", False)
             if not tests_passed:
-                violations.append("Test violation: tests must pass")
+                violations.append("[tests.failed] Tests must pass")
         
         # Rule 5: Sign-off Requirements
         if rules.get("signed_off"):
             signed_off = input_data.get("signed_off", False)
             if not signed_off:
-                violations.append("Sign-off violation: sign-off required")
+                violations.append("[signoff.missing] Sign-off required")
         
         # Rule 6: Rate Limiting
         max_deployments = rules.get("max_deployments_per_day", 0)
         if max_deployments > 0:
             deployments_today = input_data.get("deployments_today", 0)
             if deployments_today > max_deployments:
-                violations.append(f"Rate limit violation: daily limit exceeded ({deployments_today} > {max_deployments})")
+                violations.append(f"[rate_limit.exceeded] Daily limit exceeded ({deployments_today} > {max_deployments})")
         
         return violations
     
@@ -208,7 +208,7 @@ def main():
     # Initialize validator
     try:
         wasm_file = "build/policy.wasm" if os.path.exists("build/policy.wasm") else None
-        data_file = "policies/policy.json"
+        data_file = ".gate/policy.json"
         
         if not os.path.exists(data_file):
             print(f"❌ Policy data file not found: {data_file}")

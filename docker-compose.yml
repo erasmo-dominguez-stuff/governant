@@ -24,7 +24,7 @@ services:
       - "8182:8181"
     volumes:
       - ./policies:/workspace/policies
-    command: opa run --server --addr :8181 --log-level debug policies/
+    command: opa run --server --addr :8181 --log-level debug .gate/
     profiles:
       - server
       

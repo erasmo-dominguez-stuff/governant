@@ -25,10 +25,10 @@ The playground has three main sections:
 ## 📝 Testing Our GitHub Release Policy
 
 ### Step 1: Copy the Policy
-Copy the entire contents of `policies/github-release.rego` into the **Policy** section.
+Copy the entire contents of `.gate/github-release.rego` into the **Policy** section.
 
 ### Step 2: Copy the Policy Configuration
-Copy the entire contents of `policies/policy.json` into the **Input** section.
+Copy the entire contents of `.gate/policy.json` into the **Input** section.
 
 ### Step 3: Test Specific Scenarios
 

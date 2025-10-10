@@ -27,7 +27,7 @@ RUN curl -L -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest
 WORKDIR /workspace
 
 # Copy policy files
-COPY policies/ ./policies/
+COPY .gate/ ./.gate/
 COPY test-inputs/ ./test-inputs/
 COPY test-policy.sh ./test-policy.sh
 COPY test-advanced.sh ./test-advanced.sh

@@ -1,18 +1,41 @@
-# GitHub Gate - Simplified Deployment Policy Engine
+# GitHub Gate - Deployment Policy Engine
 
-A simplified, lightweight deployment policy engine for GitHub releases using Open Policy Agent (OPA) and Rego policies.
+A comprehensive deployment policy engine for GitHub releases using Open Policy Agent (OPA) and Rego policies with JSON Schema validation.
 
 ## Overview
 
-This project provides a streamlined approach to enforcing deployment policies across different environments (production, staging, development) with minimal configuration and maximum clarity.
+This project implements a three-layer architecture for deployment policy enforcement:
+
+1. **`.gate/policy.json`** - Team configuration (what they want to enforce)
+2. **`.gate/schema.json`** - Structure validation (JSON Schema for policy.json)
+3. **`.gate/*.rego`** - Policy logic (OPA Rego rules that decide allow/deny)
+
+## Architecture
+
+### Layer 1: Policy Configuration (`.gate/policy.json`)
+**What it is**: A configuration file that each team stores in their repository.
+**Purpose**: Declare their rules (e.g., allowed branches, number of approvals, ticket patterns, etc.).
+**Mental model**: This contains NO "validation code". Only data that says: "this is how we play in this repo."
+
+### Layer 2: Schema Validation (`.gate/schema.json`)
+**What it is**: A JSON Schema that defines the structure and types of policy.json.
+**Purpose**: Catch simple errors before reaching logic: misspelled fields, incorrect types, etc.
+**Mental model**: The schema only answers: "is it well-formed?". It doesn't decide if you can deploy.
+
+### Layer 3: Policy Logic (`.gate/*.rego`)
+**What it is**: Rego code (OPA) that implements the semantics: "given team rules + deployment context, allow or block?".
+**Purpose**: Make the compliance decision by reading:
+- The policy.json (already validated by schema)
+- The context (branch, environment, number of deployments today, tickets, passed checks, etc.)
 
 ## Features
 
-- **Simplified Policy Configuration**: Minimal JSON configuration with only essential rules
+- **Three-Layer Architecture**: Schema validation, policy configuration, and logic separation
 - **Environment-Specific Rules**: Different validation rules for production, staging, and development
-- **OPA Integration**: Uses Open Policy Agent for policy evaluation
+- **OPA Integration**: Uses Open Policy Agent for policy evaluation with structured violations
+- **JSON Schema Validation**: Automatic validation of policy structure before execution
 - **Python Validation**: Python scripts for testing and validation
-- **GitHub Actions**: Automated CI/CD workflows for policy validation
+- **Structured Violations**: Detailed violation reporting with error codes and messages
 
 ## Policy Rules
 
@@ -27,7 +50,7 @@ The simplified policy enforces 6 core rules:
 
 ## Configuration
 
-### Policy Structure (`policies/policy.json`)
+### Policy Structure (`.gate/policy.json`)
 
 ```json
 {
@@ -79,6 +102,27 @@ The simplified policy enforces 6 core rules:
 
 ## Usage
 
+### Schema Validation
+
+```bash
+# Validate policy.json against schema.json
+python scripts/validate_schema.py
+
+# Using jsonschema directly (if installed)
+jsonschema -i .gate/policy.json .gate/schema.json
+```
+
+### Policy Execution
+
+```bash
+# Execute policy with structured input
+python scripts/execute_policy.py
+
+# Using OPA directly
+opa eval --data .gate/github-release.rego --input input.json data.github.deploy.allow
+opa eval --data .gate/github-release.rego --input input.json data.github.deploy.violations
+```
+
 ### Running Tests
 
 ```bash
@@ -90,16 +134,19 @@ python scripts/test_all_scenarios.py
 
 # Run performance benchmarks
 python scripts/benchmark_policy.py
+
+# Run OPA tests
+./test-policy.sh all
 ```
 
 ### Using OPA Directly
 
 ```bash
 # Validate Rego syntax
-opa check policies/github-release.rego
+opa check .gate/github-release.rego
 
 # Test with input file
-opa eval --data policies/policy.json --input test-inputs/production-valid.json 'data.policy.github.release.allow'
+opa eval --data .gate/github-release.rego --input test-inputs/production-valid.json data.github.deploy.allow
 ```
 
 ### GitHub Actions
@@ -112,7 +159,7 @@ The project includes automated workflows:
 ## File Structure
 
 ```
-├── policies/
+├── .gate/
 │   ├── github-release.rego    # Simplified Rego policy
 │   └── policy.json            # Simplified configuration
 ├── scripts/
@@ -151,16 +198,17 @@ chmod +x opa
 sudo mv opa /usr/local/bin/
 ```
 
-## Simplification Changes
+## Implementation Details
 
-This version has been significantly simplified:
+This version implements the three-layer architecture:
 
-- ✅ Removed all references to "techlink"
-- ✅ Reduced policy parameters from 20+ to 7 essential rules
-- ✅ Simplified Rego code from 343 lines to 67 lines
-- ✅ Streamlined test inputs to only essential fields
-- ✅ Updated validation scripts to match simplified policy
-- ✅ Maintained core security and compliance requirements
+- ✅ **Schema Layer**: JSON Schema validation for policy structure
+- ✅ **Configuration Layer**: Team-specific policy configuration in `.gate/policy.json`
+- ✅ **Logic Layer**: OPA Rego rules with structured violation reporting
+- ✅ **Structured Input**: Complete deployment context with environment, refs, tickets, approvals
+- ✅ **Error Codes**: Detailed violation reporting with specific error codes and messages
+- ✅ **Validation Scripts**: Separate scripts for schema validation and policy execution
+- ✅ **Test Coverage**: Comprehensive test inputs with new structured format
 
 ## Contributing
 

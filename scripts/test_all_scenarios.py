@@ -21,7 +21,7 @@ def run_comprehensive_tests():
     
     # Initialize validator
     try:
-        data_file = "policies/policy.json"
+        data_file = ".gate/policy.json"
         with open(data_file, 'r') as f:
             policy_data = json.load(f)
         
