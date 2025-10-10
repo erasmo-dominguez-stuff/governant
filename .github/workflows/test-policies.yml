@@ -79,8 +79,8 @@ jobs:
     - name: Validate policy structure
       run: |
         # Check if required files exist
-        test -f policies/github-release.rego || exit 1
-        test -f policies/policy.json || exit 1
+        test -f .gate/github-release.rego || exit 1
+        test -f .gate/policy.json || exit 1
         test -f test-policy.sh || exit 1
         test -f test-advanced.sh || exit 1
         
