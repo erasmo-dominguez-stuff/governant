@@ -6,14 +6,14 @@
 
 set -e
 
-# Colores para output
+# Output colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Función para imprimir con colores
+# Function to print status messages
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -196,5 +196,5 @@ main() {
     print_status "🏁 Tests completed"
 }
 
-# Ejecutar función principal
+# Run main function
 main "$@"
