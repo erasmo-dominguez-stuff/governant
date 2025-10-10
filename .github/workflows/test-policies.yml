@@ -31,11 +31,11 @@ jobs:
         
     - name: Validate Rego syntax
       run: |
-        opa check policies/github-release.rego
+        opa check .gate/github-release.rego
         
     - name: Validate JSON files
       run: |
-        jq empty policies/policy.json
+        jq empty gates/policy.json
         for file in test-inputs/*.json; do
           echo "Validating $file..."
           jq empty "$file"

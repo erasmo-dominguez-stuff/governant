@@ -40,7 +40,7 @@ jobs:
         
     - name: Validate Rego syntax
       run: |
-        opa check policies/github-release.rego
+        opa check .gate/github-release.rego
         
     - name: Run Python validation tests
       run: |
