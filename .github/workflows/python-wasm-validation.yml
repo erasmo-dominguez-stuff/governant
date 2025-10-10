@@ -33,7 +33,7 @@ jobs:
     - name: Build WASM bundle from Rego policies
       run: |
         mkdir -p build
-        opa build --target wasm --entrypoint policy/github/release policies/ -o build/policy-bundle.tar.gz
+        opa build --target wasm --entrypoint policy/github/release .gate/ -o build/policy-bundle.tar.gz
         cd build
         tar -xzf policy-bundle.tar.gz
         ls -la

@@ -35,7 +35,7 @@ jobs:
         
     - name: Validate JSON files
       run: |
-        jq empty gates/policy.json
+        jq empty .gates/policy.json
         for file in test-inputs/*.json; do
           echo "Validating $file..."
           jq empty "$file"
@@ -108,7 +108,7 @@ jobs:
         import sys
         
         try:
-            with open('policies/policy.json') as f:
+            with open('.gate/policy.json') as f:
                 json.load(f)
             print('✅ policy.json is valid JSON')
         except Exception as e:
