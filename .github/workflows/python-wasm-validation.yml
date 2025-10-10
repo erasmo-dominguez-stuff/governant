@@ -83,7 +83,7 @@ jobs:
         pip install -r requirements.txt
         
     - name: Download WASM artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: policy-wasm-bundle
         path: build/
