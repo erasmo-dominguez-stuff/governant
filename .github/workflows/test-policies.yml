@@ -1,0 +1,129 @@
+name: Test Rego Policies
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  test-policies:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    - name: Install OPA
+      run: |
+        curl -L -o opa https://openpolicyproject.org/downloads/latest/opa_linux_amd64
+        chmod +x opa
+        sudo mv opa /usr/local/bin/
+        opa version
+        
+    - name: Install jq
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
+        
+    - name: Validate Rego syntax
+      run: |
+        opa check policies/github-release.rego
+        
+    - name: Validate JSON files
+      run: |
+        jq empty policies/policy.json
+        for file in test-inputs/*.json; do
+          echo "Validating $file..."
+          jq empty "$file"
+        done
+        
+    - name: Run basic tests
+      run: |
+        chmod +x test-policy.sh
+        ./test-policy.sh all
+        
+    - name: Run advanced analysis
+      run: |
+        chmod +x test-advanced.sh
+        ./test-advanced.sh coverage
+        
+    - name: Test specific scenarios
+      run: |
+        echo "Testing production-valid scenario..."
+        ./test-policy.sh production-valid
+        
+        echo "Testing production-invalid scenario..."
+        ./test-policy.sh production-invalid
+        
+        echo "Testing staging-valid scenario..."
+        ./test-policy.sh staging-valid
+        
+        echo "Testing emergency-production scenario..."
+        ./test-policy.sh emergency-production
+        
+    - name: Compare test results
+      run: |
+        ./test-advanced.sh compare production-valid production-invalid
+        
+  validate-policy-structure:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Validate policy structure
+      run: |
+        # Check if required files exist
+        test -f policies/github-release.rego || exit 1
+        test -f policies/policy.json || exit 1
+        test -f test-policy.sh || exit 1
+        test -f test-advanced.sh || exit 1
+        
+        # Check if test inputs exist
+        test -d test-inputs || exit 1
+        test -f test-inputs/production-valid.json || exit 1
+        test -f test-inputs/production-invalid.json || exit 1
+        test -f test-inputs/staging-valid.json || exit 1
+        test -f test-inputs/emergency-production.json || exit 1
+        
+        echo "✅ All required files present"
+        
+    - name: Check file permissions
+      run: |
+        # Ensure scripts are executable
+        test -x test-policy.sh || exit 1
+        test -x test-advanced.sh || exit 1
+        echo "✅ Scripts are executable"
+        
+    - name: Validate JSON schema
+      run: |
+        # Basic JSON validation
+        python3 -c "
+        import json
+        import sys
+        
+        try:
+            with open('policies/policy.json') as f:
+                json.load(f)
+            print('✅ policy.json is valid JSON')
+        except Exception as e:
+            print(f'❌ policy.json is invalid: {e}')
+            sys.exit(1)
+            
+        for test_file in ['test-inputs/production-valid.json', 'test-inputs/production-invalid.json', 'test-inputs/staging-valid.json', 'test-inputs/emergency-production.json']:
+            try:
+                with open(test_file) as f:
+                    json.load(f)
+                print(f'✅ {test_file} is valid JSON')
+            except Exception as e:
+                print(f'❌ {test_file} is invalid: {e}')
+                sys.exit(1)
+        "
