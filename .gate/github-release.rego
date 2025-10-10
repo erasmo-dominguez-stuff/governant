@@ -63,10 +63,10 @@ policy_missing_violations contains v if {
 # 1) Environment must exist in repo and be enabled
 environment_missing_violations contains v if {
   env_config.enabled
-  not input.environment in input.repo_environments
+  not (input.environment in input.repo_environments)
   v := {
     "code": "env.missing",
-    "msg": sprintf("Environment %q not defined in repository", [input.environment])
+    "msg": sprintf("Environment %q not defined in repository", [input.engit avironment])
   }
 }
 
