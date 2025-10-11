@@ -1,616 +1,389 @@
-# 🧩 Governant — Policy Engine & Rego Integration Guide
+# 🧭 Governant — Governance as Code Framework
 
-![OPA](https://img.shields.io/badge/Open%20Policy%20Agent-Rego-blue)
-![Governance](https://img.shields.io/badge/Governance-as--Code-green)
-![Version](https://img.shields.io/badge/version-0.1.0-lightgrey)
-![Status](https://img.shields.io/badge/status-Technical%20Preview-yellow)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Build](https://img.shields.io/github/actions/workflow/status/governant-project/governant-cli/ci.yml?label=build)
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Platform](https://img.shields.io/badge/platform-GitHub%20%7C%20ArgoCD%20%7C%20Terraform-lightgrey)
+![Status](https://img.shields.io/badge/status-vision%20%26%20MVP%20phase-yellow)
 
-> **Governant Policy Engine** provides the logic layer that powers *Governance as Code*.
->
-> It combines JSON Schema validation, team-based configuration, and Open Policy Agent (OPA) policies
-> to deliver end-to-end deployment governance for GitHub, ArgoCD, and other DevOps platforms.
+> **Governant** turns organizational policies into declarative, testable, and auditable code.  
+> *Because governance should be composable, automated, and developer‑friendly.*
 
 ---
 
-## 📘 Table of Contents
-
+## Table of Contents
 - [Overview](#-overview)
+- [Key Features](#-key-features)
+- [Philosophy](#-philosophy)
 - [Architecture](#-architecture)
-- [Policy Layers](#-policy-layers)
-  - [1️⃣ Policy Configuration (`.gate/policy.json`)](#1️⃣-policy-configuration-gatepolicyjson)
-  - [2️⃣ Schema Validation (`.gate/schema.json`)](#2️⃣-schema-validation-gateschemajson)
-  - [3️⃣ Policy Logic (`.gate/*.rego`)](#3️⃣-policy-logic-gaterego)
-- [Example Policy Rules](#-example-policy-rules)
-- [🚀 Getting Started](#-getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Local Development](#local-development)
-  - [Docker Development](#docker-development)
-- [Usage & Testing](#-usage--testing)
-- [Rego Playground Guide](#-rego-playground-guide)
-- [Common Issues](#-common-issues)
-- [Repository Layout](#-repository-layout)
-- [Next Steps](#-next-steps)
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Python 3.11+
-- [uv](https://github.com/astral-sh/uv) - Python package and environment manager
-- Docker & Docker Compose (for containerized development)
-
-### Local Development
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/governant.git
-   cd governant
-   ```
-
-2. Set up the development environment:
-   ```bash
-   # Run the development setup script
-   chmod +x scripts/setup_dev.sh
-   ./scripts/setup_dev.sh
-   ```
-
-   Or manually:
-   ```bash
-   # Install uv if not already installed
-   curl -sSf https://astral.sh/uv/install.sh | sh
-
-   # Create and activate virtual environment
-   uv venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-   # Install the package in development mode with all dependencies
-   uv pip install -e ".[dev]"
-
-   # Install pre-commit hooks
-   pre-commit install
-   pre-commit install --hook-type pre-push
-   ```
-
-### Docker Development
-
-For containerized development, you can use the provided Docker setup:
-
-```bash
-# Build and start the development environment
-docker-compose -f docker/docker-compose.yml --profile dev up -d
-
-# Run tests
-docker-compose -f docker/docker-compose.yml --profile test run --rm test
-
-# Run linters
-docker-compose -f docker/docker-compose.yml --profile lint run --rm lint
-```
-
-See the [Docker documentation](docker/README.md) for more details.
-
-## 🧭 Governant — Governance as Code Framework
-
-Governant turns organizational policies into declarative, testable, and auditable code. 
-*Because governance should be composable, automated, and developer‑friendly.*
-
-### Key Features
-
-- **Policy as Code**: Define governance rules in a declarative format
-- **Multi-Platform**: Works with GitHub, ArgoCD, and other DevOps platforms
-- **Extensible**: Easily add new policy validators and rules
-- **Developer-First**: Designed with developer experience in mind
-
-### Development Workflow
-
-1. Define your policies in `.gate/policy.json`
-2. Write tests for your policies
-3. Run tests and linters locally before committing
-4. Push changes and let CI/CD handle the rest
-
-### Testing
-
-Run tests with coverage:
-
-```bash
-# Using pytest directly (from the project root)
-pytest -v --cov=src --cov-report=term-missing
-
-# Or using the test container
-docker-compose -f docker/docker-compose.yml --profile test run --rm test
-```
-
-### Linting and Formatting
-
-```bash
-# Run all linters
-pre-commit run --all-files
-
-# Or run specific linters
-black src/ tests/
-isort src/ tests/
-flake8 src/ tests/
-mypy src/
-```
-
-## 🏗️ Project Structure
-
-```
-.
-├── .github/              # GitHub Actions workflows
-├── docker/               # Docker configuration
-│   ├── Dockerfile        # Main Dockerfile
-│   └── docker-compose.yml # Development services
-├── docs/                 # Documentation
-├── scripts/              # Utility scripts
-│   └── setup_dev.sh      # Development environment setup
-├── src/                  # Source code
-│   ├── governant/        # Main package
-│   └── tests/            # Test files
-├── .gitignore
-├── .pre-commit-config.yaml
-├── pyproject.toml        # Project metadata and dependencies
-└── README.md             # This file
-```
-
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+- [Policy Model](#-policy-model)
+- [Quick Start](#-quick-start)
+- [CLI Commands](#-cli-commands)
+- [Examples](#-examples)
+- [Integrations](#-integrations)
+- [Repository Structure](#-repository-structure)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [Security](#-security)
+- [Versioning](#-versioning)
+- [License](#-license)
+- [Credits & Inspiration](#-credits--inspiration)
 
 ---
 
 ## 🌍 Overview
 
-The **Governant Policy Engine** is the logic layer responsible for evaluating
-governance policies written in **Rego** (the Open Policy Agent language).  
-It provides a robust way to enforce deployment rules and compliance checks during CI/CD processes.
+**Governant** is an open‑source framework that transforms platform governance into code.  
+It enables organizations to define and enforce policies — such as branch protection, environment approvals, secret management, and workflow checks — across DevOps platforms like **GitHub**, **ArgoCD**, and **Terraform**.
 
-It builds on the *Governant philosophy*:
-> *Define your governance declaratively, validate it automatically, and enforce it confidently.*
+Instead of relying on documentation, meetings, or manual reviews, Governant brings **compliance and control directly into your pipelines** with validations, reports, and optional automatic remediation via Pull Requests.
+
+---
+
+## ✨ Key Features
+
+| Category | Description |
+|-----------|-------------|
+| 🧩 **Declarative Governance** | Define policies as YAML/JSON, validated by JSON Schema. |
+| 🔍 **Validation Engine** | Evaluate repositories, environments, rulesets, and pipelines. |
+| 🔐 **Enforcement** | Fail builds or run in audit‑only mode; optional autofix via PRs. |
+| 🧪 **Preflight Checks** | Lint policies and simulate validations locally (dry‑run). |
+| 📊 **Reporting** | Emit JSON/HTML/Markdown reports; export SARIF for code scanning. |
+| ⚙️ **Extensible Providers** | Providers for GitHub, ArgoCD, Terraform (more coming). |
+| 🧱 **Composability** | Reusable rule packs, shared org baselines, team overrides. |
+| 🧭 **Traceability** | Every rule change is versioned and reviewable like code. |
+
+---
+
+## 🧠 Philosophy
+
+> “Governance should be an engineering discipline — not a bureaucracy.”
+
+Governant embraces five principles:
+
+1. **Declarative over procedural** — describe *what* must hold true, not *how* to enforce it.  
+2. **Composability** — small, reusable rule blocks that can be assembled per team/env.  
+3. **Transparency** — governance lives in the repo; every change is a diff.  
+4. **Autonomy** — teams have freedom within safe, well‑defined boundaries.  
+5. **Auditability** — compliance is observable, measurable, and reproducible.
 
 ---
 
 ## 🧱 Architecture
 
-Governant’s policy enforcement model uses a **three-layer architecture**:
-
 ```
-┌──────────────────────────────┐
-│ .gate/policy.json            │
-│  → Team configuration         │
-│  (Declarative Rules)          │
-└───────────────┬──────────────┘
+┌───────────────────────────────────────────┐
+│              Governant CLI                │
+│  (define • validate • enforce • report)   │
+└───────────────────────────────────────────┘
                 │
-┌───────────────▼──────────────┐
-│ .gate/schema.json             │
-│  → Schema validation          │
-│  (Structure & Type Checking)  │
-└───────────────┬──────────────┘
-                │
-┌───────────────▼──────────────┐
-│ .gate/*.rego                  │
-│  → Policy logic               │
-│  (OPA Rules / Enforcement)    │
-└──────────────────────────────┘
+                ▼
+     ┌──────────────────────────┐
+     │    Governance Engine     │
+     │  • Policy schema loader  │
+     │  • Rule evaluator        │
+     │  • Provider orchestrator │
+     └──────────────────────────┘
+        │            │           │
+        ▼            ▼           ▼
+   GitHub Provider  ArgoCD     Terraform
+   (repos, envs,    Provider   Provider
+    rulesets)       (apps)     (state)
 ```
 
-Each layer serves a distinct purpose:
-
-| Layer | Responsibility | Tooling |
-|--------|----------------|---------|
-| **Configuration** | Define the governance intent (team’s rules). | JSON |
-| **Schema Validation** | Validate structure, fields, and data types. | JSON Schema / Python |
-| **Logic** | Apply governance logic, compute allow/deny decisions. | Rego (OPA) |
+- **CLI** — entry point to validate, report, and remediate.  
+- **Engine** — parses policies, resolves rule packs, runs evaluators.  
+- **Providers** — implement resource discovery & actions for each tool.
 
 ---
 
-## 🧩 Policy Layers
+## 📐 Policy Model
 
-### 1️⃣ Policy Configuration (`.gate/policy.json`)
+Policies are small, composable, and versioned. They can import **rule packs** and allow **team overrides**.
 
-A declarative configuration that defines what a team enforces in their repo.
-
-> **No logic lives here — only intent.**
-
-```json
-{
-  "policy": {
-    "version": "1.0.0",
-    "metadata": {
-      "description": "Deployment governance policy for production",
-      "last_updated": "2025-01-18"
-    },
-    "environments": {
-      "production": {
-        "enabled": true,
-        "rules": {
-          "approvals_required": 2,
-          "allowed_branches": ["main"],
-          "require_ticket": true,
-          "ticket_pattern": "^(INC|CHG|REQ)-[0-9]{6,}$",
-          "tests_passed": true,
-          "signed_off": true,
-          "max_deployments_per_day": 5
-        }
-      },
-      "staging": {
-        "enabled": true,
-        "rules": {
-          "approvals_required": 1,
-          "allowed_branches": ["main", "develop"],
-          "require_ticket": false,
-          "tests_passed": true,
-          "signed_off": false,
-          "max_deployments_per_day": 20
-        }
-      }
-    }
-  }
-}
-```
-
----
-
-### 2️⃣ Schema Validation (`.gate/schema.json`)
-
-Defines the expected structure and data types for `policy.json`.  
-Ensures all policies are well-formed before policy evaluation.
-
-```bash
-jsonschema -i .gate/policy.json .gate/schema.json
-```
-
-**Example schema excerpt:**
-```json
-{
-  "type": "object",
-  "properties": {
-    "policy": {
-      "type": "object",
-      "properties": {
-        "version": { "type": "string" },
-        "environments": { "type": "object" }
-      },
-      "required": ["version", "environments"]
-    }
-  }
-}
-```
-
----
-
-### 3️⃣ Policy Logic (`.gate/*.rego`)
-
-Implements the actual enforcement rules using **Rego**, the Open Policy Agent (OPA) language.  
-Each `.rego` file defines one or more rules that determine whether a deployment is allowed.
-
-**Example: `github-release.rego`**
-```rego
-package policy.github.release
-
-default allow = false
-
-allow {
-    input.env == "production"
-    input.ref_type == "branch"
-    input.ref == "refs/heads/main"
-    input.artifact_signed
-    input.release_controlled
-    input.approvers[_]
-    count(input.approvers) >= 2
-    input.tests_passed
-    not deny[_]
-}
-
-deny[msg] {
-    input.env == "production"
-    not input.tests_passed
-    msg := "CONTROLLED_TESTED_SEGREGATED_VIOLATION: Tests must pass before deployment."
-}
-```
-
----
-
-## ⚖️ Example Policy Rules
-
-| Rule | Description |
-|------|--------------|
-| **Approval Requirements** | Minimum number of approvers required. |
-| **Branch Authorization** | Only specific branches allowed per environment. |
-| **Ticket Requirements** | Valid ticket IDs required for production. |
-| **Test Requirements** | Tests must pass before deployment. |
-| **Sign-off Requirements** | Sign-offs required for production releases. |
-| **Rate Limiting** | Limit number of daily deployments per environment. |
-
----
-
-## 🧪 Local Development & Testing
-
-### Prerequisites
-
-- Python 3.8+
-- [OPA (Open Policy Agent)](https://www.openpolicyagent.org/docs/latest/#running-opa)
-- [Poetry](https://python-poetry.org/docs/#installation) (Python dependency management)
-
-### Quick Start
-
-1. **Clone the repository** (if you haven't already):
-   ```bash
-   git clone https://github.com/your-org/governant.git
-   cd governant
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   # Install Python dependencies
-   poetry install
-   
-   # Install OPA (if not already installed)
-   curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
-   chmod +x opa
-   sudo mv opa /usr/local/bin/
-   ```
-
-### Testing with Scripts
-
-We provide two main test scripts to simplify local development:
-
-1. **Test Everything** - Runs all tests (OPA and Python):
-   ```bash
-   ./scripts/test_local.sh
-   ```
-
-2. **OPA Tests Only** - Focus on OPA/Rego policies:
-   ```bash
-   ./scripts/test_opa.sh
-   ```
-
-### Manual Testing
-
-#### 1. Validate Schema
-```bash
-python scripts/validate_schema.py
-```
-
-#### 2. Run Python Tests
-```bash
-# Run all tests with coverage
-pytest -v --cov=src --cov-report=term-missing
-
-# Run specific test file
-pytest tests/unit/test_validators.py -v
-
-# Run with coverage report
-pytest --cov=src --cov-report=html
-open htmlcov/index.html  # View coverage report
-```
-
-#### 3. Test OPA Policies
-```bash
-# Validate Rego syntax
-opa check .gate/*.rego
-
-# Evaluate a specific policy
-opa eval --data .gate/github-release.rego \
-         --input test-inputs/production-valid.json \
-         "data.policy.github.release.allow"
-
-# Get detailed evaluation
-opa eval --format pretty \
-         --data .gate/github-release.rego \
-         --input test-inputs/production-valid.json \
-         "data.policy.github.release"
-```
-
-### Linting and Code Quality
-
-```bash
-# Run black formatter
-black src/ tests/
-
-# Check import ordering
-isort src/ tests/
-
-# Run flake8 linter
-flake8 src/ tests/
-
-# Run mypy type checking
-mypy src/
-```
-
-### Pre-commit Hooks
-
-This project includes a comprehensive pre-commit configuration that runs various checks before each commit. The hooks will automatically format, lint, and check your code for common issues.
-
-#### Installation
-
-1. Install pre-commit if you haven't already:
-   ```bash
-   pip install pre-commit
-   ```
-
-2. Install the git hooks:
-   ```bash
-   pre-commit install
-   ```
-
-   This will set up the git hooks to run automatically before each commit.
-
-#### Running Manually
-
-You can run the pre-commit checks on all files at any time with:
-
-```bash
-pre-commit run --all-files
-```
-
-To run a specific hook (e.g., black):
-
-```bash
-pre-commit run black --all-files
-```
-
-#### Available Hooks
-
-The following hooks are configured:
-
-- **Code Formatting**
-  - `black`: Python code formatter
-  - `isort`: Sorts Python imports
-  - `trailing-whitespace`: Trims trailing whitespace
-  - `end-of-file-fixer`: Ensures files end with a newline
-
-- **Linting**
-  - `flake8`: Python linter with several plugins
-  - `mypy`: Static type checking
-  - `shellcheck`: Shell script linting
-  - `markdownlint`: Markdown formatting
-  - `yamllint`: YAML formatting and validation
-
-- **Security**
-  - `detect-secrets`: Prevents committing sensitive data
-  - `debug-statements`: Checks for debugger imports
-
-- **Validation**
-  - `check-json`: Validates JSON files
-  - `check-yaml`: Validates YAML files
-  - `check-toml`: Validates TOML files
-  - `konstraint-validate`: Validates OPA Rego policies
-
-#### Skipping Hooks
-
-To skip pre-commit hooks for a single commit:
-
-```bash
-git commit --no-verify -m "Your commit message"
-```
-
-#### Updating Hooks
-
-To update all hooks to their latest versions:
-
-```bash
-pre-commit autoupdate
-```
-
-### GitHub Action Integration
-
-You can also test using the same environment as CI:
+### Example Policy (YAML)
 
 ```yaml
+version: 1.0.0
+metadata:
+  id: production-governance
+  description: Governance rules for production environments
+  owners: ["platform@company.com"]
+imports:
+  - ./rulepacks/github_baseline.yaml
+  - ./rulepacks/security_minimum.yaml
+selector:
+  provider: github
+  org: schroder-engineering
+rules:
+  approvals_required: 2
+  allowed_branches: ["main"]
+  require_ticket: true
+  ticket_pattern: "^(CHG|REQ|INC)-[0-9]{6,}$"
+  tests_passed: true
+  max_deployments_per_day: 5
+overrides:
+  team: "data-platform"
+  rules:
+    max_deployments_per_day: 8  # exception approved for this team
+```
+
+### JSON Schema (excerpt)
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Governant Policy",
+  "type": "object",
+  "required": ["version", "metadata", "rules"],
+  "properties": {
+    "version": { "type": "string" },
+    "metadata": {
+      "type": "object",
+      "required": ["id", "description"],
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "owners": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "imports": { "type": "array", "items": { "type": "string" } },
+    "selector": { "type": "object" },
+    "rules": { "type": "object" },
+    "overrides": { "type": "object" }
+  }
+}
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1) Install
+
+**Python (pip):**
+```bash
+pip install governant
+```
+
+**Docker:**
+```bash
+docker run --rm -it -v $PWD:/work ghcr.io/governant-project/governant-cli:latest   governant --help
+```
+
+### 2) Validate your org
+
+```bash
+governant validate   --policy ./policies/production.yaml   --provider github   --org schroder-engineering
+```
+
+**Sample Output**
+```
+✔ devops-toolchain → compliant
+✖ legacy-app → violations (2)
+   - allowed_branches: branch 'main' not protected
+   - approvals_required: expected 2, found 0
+----------------------------------------------
+Summary: 14 compliant | 2 with violations
+Report: ./reports/governant_2025-10-11.json
+Exit code: 1
+```
+
+### 3) Produce a report
+
+```bash
+governant report ./reports/governant_last.json --format html --out ./reports/index.html
+```
+
+### 4) Autofix (optional, experimental)
+
+```bash
+governant fix --policy ./policies/production.yaml --provider github --org schroder-engineering
+# Opens PRs with branch protection/ruleset changes where possible
+```
+
+---
+
+## 🧰 CLI Commands
+
+| Command | Description |
+|----------|-------------|
+| `governant validate` | Validate resources against a policy (exits non‑zero on violations unless `--audit`). |
+| `governant report` | Convert JSON results into HTML/Markdown/SARIF. |
+| `governant fix` | Attempt best‑effort remediation via PRs. |
+| `governant lint` | Lint/validate policy files against schema. |
+| `governant version` | Print current version. |
+
+**Global flags:** `--audit`, `--verbose`, `--provider`, `--org`, `--repo`, `--selector.file`
+
+---
+
+## 🧪 Examples
+
+### Example: GitHub ruleset
+
+```yaml
+rules:
+  github:
+    branch_protection:
+      required: true
+      require_status_checks: true
+      required_approvals: 2
+      code_scanning_required: true
+    environments:
+      production:
+        approvals_required: 2
+        required_reviewers: ["release-managers"]
+        restricted_deployers: ["platform-ci"]
+```
+
+### Example: ArgoCD app policy
+
+```yaml
+selector:
+  provider: argocd
+  project: platform
+rules:
+  argocd:
+    syncPolicy: automated
+    prune: true
+    selfHeal: true
+    allowEmpty: false
+```
+
+### Example: Terraform policy
+
+```yaml
+selector:
+  provider: terraform
+rules:
+  terraform:
+    minimum_version: "1.5.0"
+    forbidden_providers: ["random"]
+    required_providers:
+      aws: ">= 5.0.0"
+    tag_enforcement:
+      required_tags: ["owner", "cost-center", "environment"]
+```
+
+---
+
+## 🔌 Integrations
+
+### GitHub Action (CI)
+
+```yaml
+name: Governance Validation
+on:
+  pull_request:
+    branches: [main]
 jobs:
-  policy-validation:
+  compliance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Governance Policy
-        run: |
-          opa eval --data .gate/github-release.rego \
-                   --input .gate/input.json \
-                   "data.policy.github.release.allow"
+      - name: Governant Validate
+        uses: governant-project/governant-action@v1
+        with:
+          policy: ./policies/production.yaml
+          provider: github
+          org: schroder-engineering
+```
+
+### Pre-commit
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: governant-lint
+        name: Governant Policy Lint
+        entry: governant lint --policy policies/production.yaml
+        language: system
+        files: ^policies/.*\.ya?ml$
 ```
 
 ---
 
-## 🧮 Rego Playground Guide
+## 🗂 Repository Structure
 
-The [Rego Playground](https://play.openpolicyagent.org/) is an online environment to **test policies interactively** before integrating them into Governant.
-
-### 🧭 Getting Started
-
-1. Visit the [Rego Playground](https://play.openpolicyagent.org/).  
-2. Copy your Rego policy (e.g., `.gate/github-release.rego`) into the **Policy** section.  
-3. Copy your policy input (`.gate/policy.json`) or any test case into the **Input** section.  
-4. Query results using expressions such as:
-   ```
-   data.policy.github.release.allow
-   data.policy.github.release.deny
-   ```
-
-### ✅ Example Valid Input
-```json
-{
-  "env": "production",
-  "ref_type": "branch",
-  "ref": "refs/heads/main",
-  "artifact_signed": true,
-  "release_controlled": true,
-  "approvers": ["user1", "user2"],
-  "tests_passed": true,
-  "ticket_id": "CHG-123456"
-}
 ```
-
-**Expected output:**
-```json
-{ "result": true }
-```
-
-### ❌ Example Invalid Input
-```json
-{
-  "env": "production",
-  "ref": "refs/heads/feature-branch",
-  "approvers": ["user1"],
-  "tests_passed": false
-}
-```
-
-**Expected output:**
-```json
-{
-  "result": [
-    "CONTROLLED_TESTED_SEGREGATED_VIOLATION: Tests must pass before deployment."
-  ]
-}
+governant/
+├── cli/                  # CLI core
+├── engine/               # Policy engine
+├── providers/            # github/, argocd/, terraform/
+├── schemas/              # JSON Schemas for policies
+├── reports/              # Output artifacts (gitignored)
+├── examples/             # Example policies and rule packs
+├── docs/                 # MkDocs site
+├── .github/
+│   └── workflows/ci.yml  # Lint + unit tests
+├── pyproject.toml
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+└── LICENSE
 ```
 
 ---
 
-## 🚨 Common Issues
+## 🗺 Roadmap
 
-| Type | Description | Resolution |
-|------|--------------|-------------|
-| **Syntax Errors** | Missing `if` or misaligned braces. | Run `opa check .gate/*.rego`. |
-| **Logic Errors** | Incorrect condition or missing input fields. | Use Playground to inspect values. |
-| **Input Validation** | Wrong JSON types or structure. | Validate with `jsonschema`. |
+| Phase | Focus | Key Deliverables |
+|------:|-------|------------------|
+| 1 — MVP | CLI + GitHub provider | Policy schema, basic validators, JSON/HTML reports |
+| 2 — Expansion | Terraform + ArgoCD providers | Cross‑tool governance, selectors |
+| 3 — Automation | Auto‑fix + GitHub Action | PR‑based remediation, SARIF export |
+| 4 — Dashboard | Streamlit/React UI | Multi‑org view, metrics, trendlines |
+| 5 — Enterprise | Vault/OIDC/Azure | Secretless auth, SSO, plugin system |
 
 ---
 
-## 🗂 Repository Layout
+## 🤝 Contributing
 
+We welcome contributions! Please read **CONTRIBUTING.md** for details on our code of conduct, the process for submitting pull requests, and how to run tests locally.
+
+Quick start:
+```bash
+# clone
+git clone https://github.com/governant-project/governant-cli.git
+cd governant-cli
+
+# create venv
+python -m venv .venv && source .venv/bin/activate
+
+# install dev deps
+pip install -e ".[dev]"
+
+# run tests
+pytest -q
 ```
-├── .gate/
-│   ├── github-release.rego    # Rego policy logic
-│   ├── schema.json            # JSON Schema for policy.json
-│   └── policy.json            # Team configuration
-├── scripts/
-│   ├── validate_schema.py
-│   ├── execute_policy.py
-│   ├── test_all_scenarios.py
-│   └── benchmark_policy.py
-├── test-inputs/
-│   ├── production-valid.json
-│   ├── production-invalid.json
-│   └── staging-valid.json
-└── .github/workflows/
-    └── validate-policy.yml
-```
 
 ---
 
-## 🎯 Next Steps
+## 🛡 Security
 
-1. Use Rego Playground for iterative testing.  
-2. Validate your policies with schema checks locally.  
-3. Integrate Governant’s CLI for large-scale org validation.  
-4. Automate policy enforcement in CI pipelines.  
-5. Contribute new rule packs and providers.
+If you discover a security issue, please **do not open a public issue**.  
+Email the maintainers at **security@governant.io** with details and reproduction steps. We follow a **90‑day responsible disclosure** window when appropriate.
 
 ---
 
-**MIT © 2025 [Erasmo Domínguez](https://github.com/erasmolpa)**  
-Governant — *Governance as Code for real-world platforms.*
+## 🔢 Versioning
+
+We use **Semantic Versioning** (SemVer). Breaking changes bump the major version.  
+Changelogs are maintained in **CHANGELOG.md**.
+
+---
+
+## 📘 License
+
+MIT © 2025 [Erasmo Domínguez](https://github.com/erasmolpa)
+
+---
+
+## 💬 Credits & Inspiration
+
+- Open Policy Agent (OPA) • HashiCorp Sentinel • GitHub Rulesets  
+- ArgoCD App‑of‑Apps • Kubernetes RBAC • Policy‑as‑Code movement  
+- The idea that **governance = trust through code**
+
+> “Governance isn’t about restriction — it’s about **enabling autonomy with confidence**.”
