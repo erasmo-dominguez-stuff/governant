@@ -1,0 +1,9 @@
+{
+  "package": "github.deploy",
+  "entrypoints": ["github/deploy/allow", "github/deploy/violations"],
+  "artifacts": {
+    "wasm": "./github-release.wasm",
+    "data": "./data.json",
+    "bundle": "./github-release.tar.gz"
+  }
+}

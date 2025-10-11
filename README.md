@@ -21,11 +21,144 @@
   - [2️⃣ Schema Validation (`.gate/schema.json`)](#2️⃣-schema-validation-gateschemajson)
   - [3️⃣ Policy Logic (`.gate/*.rego`)](#3️⃣-policy-logic-gaterego)
 - [Example Policy Rules](#-example-policy-rules)
+- [🚀 Getting Started](#-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Local Development](#local-development)
+  - [Docker Development](#docker-development)
 - [Usage & Testing](#-usage--testing)
 - [Rego Playground Guide](#-rego-playground-guide)
 - [Common Issues](#-common-issues)
 - [Repository Layout](#-repository-layout)
 - [Next Steps](#-next-steps)
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) - Python package and environment manager
+- Docker & Docker Compose (for containerized development)
+
+### Local Development
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-username/governant.git
+   cd governant
+   ```
+
+2. Set up the development environment:
+   ```bash
+   # Run the development setup script
+   chmod +x scripts/setup_dev.sh
+   ./scripts/setup_dev.sh
+   ```
+
+   Or manually:
+   ```bash
+   # Install uv if not already installed
+   curl -sSf https://astral.sh/uv/install.sh | sh
+
+   # Create and activate virtual environment
+   uv venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+   # Install the package in development mode with all dependencies
+   uv pip install -e ".[dev]"
+
+   # Install pre-commit hooks
+   pre-commit install
+   pre-commit install --hook-type pre-push
+   ```
+
+### Docker Development
+
+For containerized development, you can use the provided Docker setup:
+
+```bash
+# Build and start the development environment
+docker-compose -f docker/docker-compose.yml --profile dev up -d
+
+# Run tests
+docker-compose -f docker/docker-compose.yml --profile test run --rm test
+
+# Run linters
+docker-compose -f docker/docker-compose.yml --profile lint run --rm lint
+```
+
+See the [Docker documentation](docker/README.md) for more details.
+
+## 🧭 Governant — Governance as Code Framework
+
+Governant turns organizational policies into declarative, testable, and auditable code. 
+*Because governance should be composable, automated, and developer‑friendly.*
+
+### Key Features
+
+- **Policy as Code**: Define governance rules in a declarative format
+- **Multi-Platform**: Works with GitHub, ArgoCD, and other DevOps platforms
+- **Extensible**: Easily add new policy validators and rules
+- **Developer-First**: Designed with developer experience in mind
+
+### Development Workflow
+
+1. Define your policies in `.gate/policy.json`
+2. Write tests for your policies
+3. Run tests and linters locally before committing
+4. Push changes and let CI/CD handle the rest
+
+### Testing
+
+Run tests with coverage:
+
+```bash
+# Using pytest directly (from the project root)
+pytest -v --cov=src --cov-report=term-missing
+
+# Or using the test container
+docker-compose -f docker/docker-compose.yml --profile test run --rm test
+```
+
+### Linting and Formatting
+
+```bash
+# Run all linters
+pre-commit run --all-files
+
+# Or run specific linters
+black src/ tests/
+isort src/ tests/
+flake8 src/ tests/
+mypy src/
+```
+
+## 🏗️ Project Structure
+
+```
+.
+├── .github/              # GitHub Actions workflows
+├── docker/               # Docker configuration
+│   ├── Dockerfile        # Main Dockerfile
+│   └── docker-compose.yml # Development services
+├── docs/                 # Documentation
+├── scripts/              # Utility scripts
+│   └── setup_dev.sh      # Development environment setup
+├── src/                  # Source code
+│   ├── governant/        # Main package
+│   └── tests/            # Test files
+├── .gitignore
+├── .pre-commit-config.yaml
+├── pyproject.toml        # Project metadata and dependencies
+└── README.md             # This file
+```
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ---
 

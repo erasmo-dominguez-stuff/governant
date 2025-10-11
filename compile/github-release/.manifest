@@ -1,0 +1,1 @@
+{"revision":"","roots":[""],"wasm":[{"entrypoint":"github/deploy/allow","module":"/policy.wasm"},{"entrypoint":"github/deploy/violations","module":"/policy.wasm"}],"rego_version":1}
