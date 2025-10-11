@@ -194,25 +194,114 @@ deny[msg] {
 
 ---
 
-## 🧪 Usage & Testing
+## 🧪 Local Development & Testing
 
-### 1. Validate Schema
+### Prerequisites
+
+- Python 3.8+
+- [OPA (Open Policy Agent)](https://www.openpolicyagent.org/docs/latest/#running-opa)
+- [Poetry](https://python-poetry.org/docs/#installation) (Python dependency management)
+
+### Quick Start
+
+1. **Clone the repository** (if you haven't already):
+   ```bash
+   git clone https://github.com/your-org/governant.git
+   cd governant
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   # Install Python dependencies
+   poetry install
+   
+   # Install OPA (if not already installed)
+   curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+   chmod +x opa
+   sudo mv opa /usr/local/bin/
+   ```
+
+### Testing with Scripts
+
+We provide two main test scripts to simplify local development:
+
+1. **Test Everything** - Runs all tests (OPA and Python):
+   ```bash
+   ./scripts/test_local.sh
+   ```
+
+2. **OPA Tests Only** - Focus on OPA/Rego policies:
+   ```bash
+   ./scripts/test_opa.sh
+   ```
+
+### Manual Testing
+
+#### 1. Validate Schema
 ```bash
 python scripts/validate_schema.py
 ```
 
-### 2. Evaluate Policy
+#### 2. Run Python Tests
 ```bash
-opa eval --data .gate/github-release.rego          --input test-inputs/production-valid.json          "data.policy.github.release.allow"
+# Run all tests with coverage
+pytest -v --cov=src --cov-report=term-missing
+
+# Run specific test file
+pytest tests/unit/test_validators.py -v
+
+# Run with coverage report
+pytest --cov=src --cov-report=html
+open htmlcov/index.html  # View coverage report
 ```
 
-### 3. Run Unit Tests
+#### 3. Test OPA Policies
 ```bash
-pytest -q
-./test-policy.sh all
+# Validate Rego syntax
+opa check .gate/*.rego
+
+# Evaluate a specific policy
+opa eval --data .gate/github-release.rego \
+         --input test-inputs/production-valid.json \
+         "data.policy.github.release.allow"
+
+# Get detailed evaluation
+opa eval --format pretty \
+         --data .gate/github-release.rego \
+         --input test-inputs/production-valid.json \
+         "data.policy.github.release"
 ```
 
-### 4. GitHub Action Integration
+### Linting and Code Quality
+
+```bash
+# Run black formatter
+black src/ tests/
+
+# Check import ordering
+isort src/ tests/
+
+# Run flake8 linter
+flake8 src/ tests/
+
+# Run mypy type checking
+mypy src/
+```
+
+### Pre-commit Hooks
+
+To automatically run checks before each commit, install the pre-commit hooks:
+
+```bash
+pre-commit install
+```
+
+This will run black, isort, flake8, and mypy on staged files before each commit.
+
+### GitHub Action Integration
+
+You can also test using the same environment as CI:
+
 ```yaml
 jobs:
   policy-validation:
@@ -221,7 +310,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Governance Policy
         run: |
-          opa eval --data .gate/github-release.rego                    --input .gate/input.json                    "data.policy.github.release.allow"
+          opa eval --data .gate/github-release.rego \
+                   --input .gate/input.json \
+                   "data.policy.github.release.allow"
 ```
 
 ---
