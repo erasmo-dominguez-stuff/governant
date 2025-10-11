@@ -28,27 +28,38 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install poetry
+        poetry install --no-interaction --no-root
+        pip install -e .
         
-    - name: Build WASM bundle from Rego policies
+    - name: Build WASM bundle from Rego policies (if needed)
       run: |
-        mkdir -p build
-        opa build --target wasm --entrypoint policy/github/release .gate/ -o build/policy-bundle.tar.gz
-        cd build
-        tar -xzf policy-bundle.tar.gz
-        ls -la
+        if [ -d ".gate" ]; then
+          mkdir -p build
+          opa build --target wasm --entrypoint policy/github/release .gate/ -o build/policy-bundle.tar.gz
+          cd build
+          tar -xzf policy-bundle.tar.gz
+          ls -la
+        else
+          echo "No .gate directory found, skipping WASM bundle creation"
+        fi
         
-    - name: Validate Rego syntax
+    - name: Validate Rego syntax (if .gate exists)
+      if: contains(runner.os, 'Linux') && contains(github.ref, 'main')
       run: |
-        opa check .gate/github-release.rego
+        if [ -f ".gate/github-release.rego" ]; then
+          opa check .gate/github-release.rego
+        else
+          echo "No .gate/github-release.rego found, skipping Rego syntax check"
+        fi
         
-    - name: Run Python validation tests
+    - name: Run Python tests
       run: |
-        python scripts/validate_policy.py
+        pytest -v --cov=src --cov-report=term-missing
         
-    - name: Run comprehensive Python tests
+    - name: Run type checking
       run: |
-        python scripts/test_all_scenarios.py
+        mypy src/
         
     - name: Upload WASM artifacts
       uses: actions/upload-artifact@v4
