@@ -1,0 +1,138 @@
+name: Validate PR to Main
+
+on:
+  # Trigger on pull requests targeting the main branch
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+# This ensures the workflow has read/write permissions for checks
+permissions:
+  pull-requests: write
+  contents: read
+  checks: write
+
+jobs:
+  validate-pr:
+    name: Validate PR Compliance
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Policy Validation
+      id: policy-check
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        echo "Validating PR #${{ github.event.pull_request.number }} against policies..."
+        
+        # Determine target environment based on target branch
+        TARGET_ENV="production"  # Since this is for main branch
+        
+        # Run the policy validation
+        if python scripts/validate_environment.py "$TARGET_ENV"; then
+          echo "::notice::✅ PR is compliant with $TARGET_ENV policies"
+          echo "is_compliant=true" >> $GITHUB_OUTPUT
+        else
+          echo "::error::❌ PR is not compliant with $TARGET_ENV policies"
+          echo "is_compliant=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Update PR Status
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: checkRuns } = await github.rest.checks.listForRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: context.payload.pull_request.head.sha,
+            check_name: 'Policy Compliance Check'
+          });
+          
+          const existingRun = checkRuns.check_runs.find(run => 
+            run.name === 'Policy Compliance Check' && 
+            run.status === 'completed'
+          );
+          
+          const conclusion = steps.policy-check.outcome === 'success' ? 'success' : 'failure';
+          const title = conclusion === 'success' 
+            ? 'All policies are compliant' 
+            : 'Policy validation failed';
+          
+          const output = {
+            title: title,
+            summary: conclusion === 'success' 
+              ? 'This PR meets all policy requirements for production.'
+              : 'This PR does not meet all policy requirements for production. Please check the logs for details.'
+          };
+          
+          if (existingRun) {
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: existingRun.id,
+              status: 'completed',
+              conclusion: conclusion,
+              output: output
+            });
+          } else {
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Policy Compliance Check',
+              head_sha: context.payload.pull_request.head.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: output
+            });
+          }
+
+    - name: Add PR Comment with Results
+      if: failure() && github.event_name == 'pull_request_target'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const message = `## ⚠️ Policy Compliance Check Failed
+          
+          This PR does not meet all the policy requirements for merging into main. Please review the following:
+          
+          - Check the [workflow run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}) for detailed error messages
+          - Review the [policy documentation](.gate/README.md) for requirements
+          - Update your changes to comply with the policies
+          
+          If you believe this is a false positive, please contact the DevOps team.`;
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: message
+          });
+
+    - name: Notify Slack on Failure
+      if: failure()
+      uses: rtCamp/action-slack-notify@v2.2.0
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        SLACK_COLOR: '#ff0000'
+        SLACK_TITLE: '❌ PR Policy Check Failed'
+        SLACK_MESSAGE: 'PR #${{ github.event.pull_request.number }} failed policy validation. Please review before merging.'
+        SLACK_USERNAME: 'Governance Bot'
+        MSG_MINIMAL: 'true'

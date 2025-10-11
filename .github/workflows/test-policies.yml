@@ -27,9 +27,20 @@ jobs:
         poetry install --no-interaction --no-root
         pip install -e .
         
-    - name: Run Python tests
+    - name: Run Python tests with test inputs and coverage
+      working-directory: ${{ github.workspace }}
       run: |
-        pytest -v --cov=src --cov-report=term-missing
+        # Verificar que el directorio de test-inputs existe
+        if [ ! -d "scripts/test-inputs" ]; then
+          echo "Error: Directory scripts/test-inputs not found"
+          exit 1
+        fi
+        
+        # Ejecutar los tests con la ruta de test-inputs configurada y cobertura
+        python -m pytest src/tests -v \
+          --test-inputs-dir=scripts/test-inputs \
+          --cov=src \
+          --cov-report=term-missing
         
     - name: Run type checking
       run: |
