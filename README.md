@@ -290,13 +290,78 @@ mypy src/
 
 ### Pre-commit Hooks
 
-To automatically run checks before each commit, install the pre-commit hooks:
+This project includes a comprehensive pre-commit configuration that runs various checks before each commit. The hooks will automatically format, lint, and check your code for common issues.
+
+#### Installation
+
+1. Install pre-commit if you haven't already:
+   ```bash
+   pip install pre-commit
+   ```
+
+2. Install the git hooks:
+   ```bash
+   pre-commit install
+   ```
+
+   This will set up the git hooks to run automatically before each commit.
+
+#### Running Manually
+
+You can run the pre-commit checks on all files at any time with:
 
 ```bash
-pre-commit install
+pre-commit run --all-files
 ```
 
-This will run black, isort, flake8, and mypy on staged files before each commit.
+To run a specific hook (e.g., black):
+
+```bash
+pre-commit run black --all-files
+```
+
+#### Available Hooks
+
+The following hooks are configured:
+
+- **Code Formatting**
+  - `black`: Python code formatter
+  - `isort`: Sorts Python imports
+  - `trailing-whitespace`: Trims trailing whitespace
+  - `end-of-file-fixer`: Ensures files end with a newline
+
+- **Linting**
+  - `flake8`: Python linter with several plugins
+  - `mypy`: Static type checking
+  - `shellcheck`: Shell script linting
+  - `markdownlint`: Markdown formatting
+  - `yamllint`: YAML formatting and validation
+
+- **Security**
+  - `detect-secrets`: Prevents committing sensitive data
+  - `debug-statements`: Checks for debugger imports
+
+- **Validation**
+  - `check-json`: Validates JSON files
+  - `check-yaml`: Validates YAML files
+  - `check-toml`: Validates TOML files
+  - `konstraint-validate`: Validates OPA Rego policies
+
+#### Skipping Hooks
+
+To skip pre-commit hooks for a single commit:
+
+```bash
+git commit --no-verify -m "Your commit message"
+```
+
+#### Updating Hooks
+
+To update all hooks to their latest versions:
+
+```bash
+pre-commit autoupdate
+```
 
 ### GitHub Action Integration
 
