@@ -1,52 +1,56 @@
 version: '3.8'
 
 services:
-  opa-policy-tester:
+  app:
     build: .
-    container_name: opa-policy-tester
+    container_name: governant-app
     volumes:
-      - .:/workspace
-      - ./policies:/workspace/policies
-      - ./test-inputs:/workspace/test-inputs
-    working_dir: /workspace
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    working_dir: /app
     environment:
-      - OPA_VERSION=0.58.0
+      - PYTHONUNBUFFERED=1
     ports:
-      - "8181:8181"
-    command: /bin/bash
+      - "8000:8000"
+    command: bash
     stdin_open: true
     tty: true
-    
-  opa-server:
-    build: .
-    container_name: opa-server
-    ports:
-      - "8182:8181"
-    volumes:
-      - ./policies:/workspace/policies
-    command: opa run --server --addr :8181 --log-level debug .gate/
     profiles:
-      - server
-      
-  opa-test-runner:
-    build: .
-    container_name: opa-test-runner
+      - dev
+
+  test:
+    build:
+      context: .
+      target: development
+    container_name: governant-test
     volumes:
-      - .:/workspace
-    working_dir: /workspace
-    command: ./test-policy.sh all
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    working_dir: /app
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      bash -c "pytest -v --cov=src --cov-report=term-missing"
     profiles:
       - test
-      
-  opa-advanced-analysis:
-    build: .
-    container_name: opa-advanced-analysis
+
+  lint:
+    build:
+      context: .
+      target: development
+    container_name: governant-lint
     volumes:
-      - .:/workspace
-    working_dir: /workspace
-    command: ./test-advanced.sh coverage
+      - .:/app
+    working_dir: /app
+    command: >
+      bash -c "black --check src/ tests/ && \
+               isort --check-only src/ tests/ && \
+               flake8 src/ tests/ && \
+               mypy src/"
     profiles:
-      - analysis
+      - lint
 
 networks:
   default:
