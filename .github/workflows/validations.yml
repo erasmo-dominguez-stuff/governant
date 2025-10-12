@@ -22,10 +22,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Set up uv
-        uses: amna/setup-uv@v1
+      - name: Set up uv (official)
+        uses: astral-sh/setup-uv@v3
         with:
-          uv-version: 'latest'
+          version: 'latest'
 
       - name: Set up Python
         uses: actions/setup-python@v5
