@@ -27,7 +27,7 @@ note(){ echo -e "• $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 GATE_DIR="${REPO_ROOT}/.gate"
-OUT_DIR="${REPO_ROOT}/compile"
+OUT_DIR="${REPO_ROOT}/.compile"
 
 # --- prereqs ---
 command -v opa >/dev/null 2>&1 || fail "OPA not found. Install: https://www.openpolicyagent.org/docs/latest/#running-opa"
@@ -76,35 +76,28 @@ build_policy() {
   local ENTRY_VIOLATIONS="${pkg_slash}/violations"
 
   local name="${base%.rego}"
-  local out_dir="${OUT_DIR}/${name}"
-  rm -rf "${out_dir}"; mkdir -p "${out_dir}"
+  mkdir -p "${OUT_DIR}"
 
-  local bundle="${out_dir}/${name}.tar.gz"
+  # Build into a temporary directory to avoid leaving extra files
+  local tmp_dir
+  tmp_dir="$(mktemp -d "${OUT_DIR}/${name}.XXXX")"
+  local bundle="${tmp_dir}/${name}.tar.gz"
 
   echo "  Building WASM bundle…"
   opa build -t wasm -e "${ENTRY_ALLOW}" -e "${ENTRY_VIOLATIONS}" "$rego" -o "$bundle"
 
   echo "  Extracting bundle…"
-  tar -xzf "$bundle" -C "$out_dir"
+  tar -xzf "$bundle" -C "$tmp_dir"
 
-  [[ -f "${out_dir}/policy.wasm" ]] || fail "policy.wasm missing for ${base}"
-  mv "${out_dir}/policy.wasm" "${out_dir}/${name}.wasm"
-  [[ -f "${out_dir}/data.json" ]] || echo "{}" > "${out_dir}/data.json"
+  [[ -f "${tmp_dir}/policy.wasm" ]] || fail "policy.wasm missing for ${base}"
+  mv "${tmp_dir}/policy.wasm" "${OUT_DIR}/${name}.wasm"
+  # Keep the bundle for OPA CLI usage
+  mv "$bundle" "${OUT_DIR}/${name}.tar.gz"
 
-  cat > "${out_dir}/${name}.manifest.json" <<EOF
-{
-  "package": "${pkg}",
-  "entrypoints": ["${ENTRY_ALLOW}", "${ENTRY_VIOLATIONS}"],
-  "artifacts": {
-    "wasm": "./${name}.wasm",
-    "data": "./data.json",
-    "bundle": "./${name}.tar.gz"
-  }
-}
-EOF
+  # Cleanup temp dir and do not keep tar.gz or other artifacts
+  rm -rf "$tmp_dir"
 
-  ok "Built ${out_dir}/${name}.wasm"
-  echo "  Manifest: ${out_dir}/${name}.manifest.json"
+  ok "Built ${OUT_DIR}/${name}.wasm"
 }
 
 main() {

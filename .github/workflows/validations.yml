@@ -5,12 +5,12 @@ on:
     branches: [ main, development ]
     paths:
       - 'scripts/**'
-      - '.github/workflows/scripts.yml'
+      - '.github/workflows/validations.yml'
   pull_request:
     branches: [ main, development ]
     paths:
       - 'scripts/**'
-      - '.github/workflows/scripts.yml'
+      - '.github/workflows/validations.yml'
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
@@ -22,16 +22,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up uv
+        uses: amna/setup-uv@v1
         with:
-          python-version: '3.10'
-          
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install opa==0.51.0 jq
-          sudo apt-get update && sudo apt-get install -y jq
+          uv-version: 'latest'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'uv'
+
+      - name: Install Python dependencies (opa-wasm)
+        run: uv pip install "opa-wasm[cranelift]"
           
       - name: Make scripts executable
         run: chmod +x scripts/*.sh
@@ -50,6 +53,12 @@ jobs:
         run: ./scripts/compile_policy.sh
         working-directory: ${{ github.workspace }}
         continue-on-error: false
+
+      - name: Evaluate policy (allow) using Python SDK (opa-wasm)
+        run: |
+          python -m src.opawasm .compile/github-release.wasm test-inputs/production-valid.json --prefer python --entrypoint data.github.deploy.allow
+        working-directory: ${{ github.workspace }}
+        continue-on-error: false
         
       - name: Upload artifacts
         if: always()
@@ -57,6 +66,6 @@ jobs:
         with:
           name: policy-artifacts
           path: |
-            compile/**
+            .compile/**
             .gate/*.json
           retention-days: 5

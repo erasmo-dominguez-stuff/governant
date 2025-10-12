@@ -1,0 +1,36 @@
+name: OPA Policy Evaluation
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  evaluate-policy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          cache: 'pip'
+
+      - name: Install OPA CLI
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+          chmod +x ./opa
+          sudo mv ./opa /usr/local/bin/opa
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Compile policy to .compile/
+        run: ./scripts/compile_policy.sh
+        working-directory: ${{ github.workspace }}
+
+      - name: Run OPA Policy Evaluation (OPA CLI)
+        run: python -m src.opawasm .compile/github-release.tar.gz test-inputs/production-valid.json --prefer opa --entrypoint data.github.deploy.allow --format pretty

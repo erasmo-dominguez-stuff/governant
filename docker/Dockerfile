@@ -1,42 +1,58 @@
-FROM python:3.11-slim as base
+###############################################
+# Builder: install OPA and compile the policy #
+###############################################
+FROM python:3.11-slim AS builder
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PIP_DEFAULT_TIMEOUT=100 \
-    VIRTUAL_ENV=/opt/venv
+    PYTHONUNBUFFERED=1
 
-# Set up virtual environment
-RUN python -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
+    ca-certificates \
+    tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -sSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Create working directory
 WORKDIR /app
 
-# Copy project files
+# Install OPA CLI (linux amd64)
+RUN curl -L -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64 \
+    && chmod +x /usr/local/bin/opa
+
+# Copy only what's needed to compile the policy
+COPY .gate/ ./.gate/
+COPY scripts/ ./scripts/
+
+# Compile policy -> outputs in .compile/<name>.wasm and .compile/<name>.tar.gz
+RUN chmod +x ./scripts/compile_policy.sh \
+    && ./scripts/compile_policy.sh
+
+###############################################
+# Runtime: minimal Python + compiled artifacts #
+###############################################
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv
+
+RUN python -m venv $VIRTUAL_ENV \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /app
+
+# Copy app code and compiled artifacts
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
+COPY --from=builder /app/.compile/ ./.compile/
 
-# Install dependencies using uv
-RUN uv pip install -e .
+# Install app (for CLI entrypoint)
+RUN pip install --no-cache-dir -e . \
+    && pip install --no-cache-dir "opa-wasm[cranelift]"
 
-# Create a non-root user
-RUN adduser --disabled-password --gecos "" appuser \
-    && chown -R appuser:appuser /app
-
-USER appuser
-
-# Set default command
-CMD ["bash"]
+# Default entrypoint to the CLI; users pass wasm path and input path
+ENTRYPOINT ["python", "-m", "src.opawasm"]
+CMD [".compile/github-release.wasm", "/input.json", "--entrypoint", "data.github.deploy.allow"]
