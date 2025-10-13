@@ -2,12 +2,20 @@ name: OPA Policy Evaluation
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
   evaluate-policy:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.10", "3.11" ]
 
     steps:
       - name: Check out code
@@ -16,25 +24,80 @@ jobs:
       - name: Set up uv (official)
         uses: astral-sh/setup-uv@v3
         with:
-          version: 'latest'
+          version: latest
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-          cache: 'uv'
+          python-version: ${{ matrix.python-version }}
+          # ❌ remove: cache: 'uv' (unsupported)
+
+      # (Opcional) Cache para uv: ruedas/artefactos
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'uv.lock', 'requirements.txt') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Ensure src is importable
+        run: |
+          mkdir -p src
+          [ -f src/__init__.py ] || touch src/__init__.py
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Install project + opa-wasm
+        run: |
+          if [ -f pyproject.toml ]; then
+            uv pip install -e .
+          fi
+          uv pip install "opa-wasm[cranelift]"
 
       - name: Set up OPA (official)
         uses: open-policy-agent/setup-opa@v3
         with:
           version: latest
 
-      - name: Make scripts executable
-        run: chmod +x scripts/*.sh
-
       - name: Compile policy to .compile/
         run: ./scripts/compile_policy.sh
-        working-directory: ${{ github.workspace }}
 
-      - name: Run OPA Policy Evaluation (OPA CLI)
-        run: python -m src.opawasm .compile/github-release.tar.gz test-inputs/production-valid.json --prefer opa --entrypoint data.github.deploy.allow --format pretty
+      # OPA CLI: evalúa el .rego, no el bundle WASM
+      - name: OPA CLI — allow (rego)
+        run: |
+          opa eval \
+            -d .gate/github-release.rego \
+            --input test-inputs/production-valid.json \
+            'data.github.deploy.allow'
+
+      - name: OPA CLI — violations (rego)
+        run: |
+          opa eval \
+            -d .gate/github-release.rego \
+            --input test-inputs/production-invalid.json \
+            'data.github.deploy.violations'
+
+      # Python (opa-wasm) usando el bundle .tar.gz vía tu CLI
+      - name: Python CLI — allow (bundle)
+        run: |
+          python -m src.cli allow \
+            -i test-inputs/production-valid.json \
+            --output bool
+
+      - name: Python CLI — violations (bundle)
+        run: |
+          python -m src.cli violations \
+            -i test-inputs/production-invalid.json \
+            --strict-exit
+
+      - name: Upload compiled artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opa-compiled
+          path: |
+            .compile/github-release.tar.gz
+            .compile/github-release.wasm
+          if-no-files-found: error
