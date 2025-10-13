@@ -90,11 +90,12 @@ Issues = "https://github.com/yourusername/governant/issues"
 Source = "https://github.com/yourusername/governant"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/opawasm"]
+packages = ["src/opawasm", "src/ghprotect"]
 
 [tool.hatch.build.targets.sdist]
 include = [
   "src/opawasm/**",
+  "src/ghprotect/**",
   "pyproject.toml",
   "README.md",
 ]

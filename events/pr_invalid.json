@@ -1,0 +1,15 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "title": "deploy without ticket",
+    "body": "No proper ticket id here.",
+    "head": { "ref": "feature/bad" },
+    "base": { "ref": "main" },
+    "reviews": [
+      { "state": "COMMENTED", "user": { "login": "user1" } }
+    ]
+  },
+  "checks": { "tests": false },
+  "signed_off": false,
+  "deployments_today": 10
+}

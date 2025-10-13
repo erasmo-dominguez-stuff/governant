@@ -41,11 +41,13 @@ def _run_with_opa_cli(wasm_or_bundle: str, input_file: str, entrypoint: str, fmt
         "eval",
         "--format",
         fmt,
+        "--entrypoint",
+        entrypoint,
         "--bundle",
         bundle_target,
         "--input",
         input_file,
-        entrypoint,
+        "true",
     ]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
