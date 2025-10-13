@@ -32,12 +32,18 @@ def evaluate_policy(
             "opa-wasm runtime is unavailable on this system. Install with: uv pip install 'opa-wasm[cranelift]'"
         ) from e
 
+    def _normalize_entrypoint(ep: str) -> str:
+        # Accept either 'data.pkg.rule' or 'pkg/rule'; return slash form
+        if ep.startswith("data."):
+            return ep[len("data."):].replace(".", "/")
+        return ep.replace(".", "/") if "/" not in ep and "." in ep else ep
+
     try:
         policy = OPAPolicy(wasm_file)
         if data is not None:
             policy.set_data(data)
         try:
-            return policy.evaluate(input_data, entrypoint=entrypoint)
+            return policy.evaluate(input_data, entrypoint=_normalize_entrypoint(entrypoint))
         except TypeError:
             # Older versions may not support entrypoint kwarg
             return policy.evaluate(input_data)
