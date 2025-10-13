@@ -1,110 +1,85 @@
 #!/usr/bin/env bash
-# -----------------------------------------------------------------------------
-# compile_policy.sh
-#
-# Compiles all Rego (.rego) under ./.gate into WASM bundles for Python.
-# Exports two entrypoints per policy:
-#   - <package>/allow
-#   - <package>/violations
-#
-# Outputs per policy in: ./compile/<policy-name>/
-#   - <policy-name>.wasm
-#   - <policy-name>.tar.gz   (OPA bundle)
-#   - data.json              (empty placeholder)
-#   - <policy-name>.manifest.json (entrypoints & artifacts)
-# -----------------------------------------------------------------------------
+set -euxo pipefail
 
-set -euo pipefail
+# --- Constants ---
+POLICY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.gate" && pwd)"
+POLICY_FILE="$POLICY_DIR/github-release.rego"
+OUTPUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.compile"
+BUNDLE_FILE="$OUTPUT_DIR/github-release.tar.gz"
+WASM_FILE="$OUTPUT_DIR/github-release.wasm"
 
-# Console colors
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
-fail(){ echo -e "${RED}❌ $*${NC}" >&2; exit 1; }
-ok(){   echo -e "${GREEN}✔ $*${NC}"; }
-warn(){ echo -e "${YELLOW}⚠ $*${NC}"; }
-note(){ echo -e "• $*"; }
-
-# Paths (this script lives in scripts/)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-GATE_DIR="${REPO_ROOT}/.gate"
-OUT_DIR="${REPO_ROOT}/.compile"
-
-# --- prereqs ---
-command -v opa >/dev/null 2>&1 || fail "OPA not found. Install: https://www.openpolicyagent.org/docs/latest/#running-opa"
-VER_LINE="$(opa version 2>/dev/null | head -n1 || true)"; [[ -n "$VER_LINE" ]] && note "Using ${VER_LINE}" || warn "Could not parse OPA version."
-[[ -d "${GATE_DIR}" ]] || fail "Directory not found: ${GATE_DIR}"
-mkdir -p "${OUT_DIR}"
-
-# Collect rego files
-shopt -s nullglob; REGO_FILES=( "${GATE_DIR}"/*.rego ); shopt -u nullglob
-[[ ${#REGO_FILES[@]} -gt 0 ]] || fail "No .rego files found in ${GATE_DIR}"
-
-# Parse package from a rego file
-parse_package() {
-  local file="$1" line
-  line="$(grep -m1 -E '^[[:space:]]*package[[:space:]]+[[:alnum:]_.]+' "$file" || true)"
-  [[ -z "$line" ]] && { echo ""; return 0; }
-  echo "$line" | sed -E 's/^[[:space:]]*package[[:space:]]+([[:alnum:]_.]+).*/\1/'
+# --- Functions ---
+log() {
+  echo "• $*"
 }
 
-# Warn if rule may be missing
-ensure_rule_exists() {
-  local file="$1" rulename="$2"
-  if ! grep -Eq "^[[:space:]]*${rulename}([[:space:]]|:|$)" "$file"; then
-    warn "Rule '${rulename}' not found in $(basename "$file"). Build may fail if truly absent."
+ensure_opa() {
+  if ! command -v opa &> /dev/null; then
+    log "OPA not found. Installing..."
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"       # darwin | linux
+    arch="$(uname -m)"
+    case "$arch" in
+      x86_64|amd64) arch="amd64" ;;
+      arm64|aarch64) arch="arm64" ;;
+      *) log "Unknown arch: $arch"; exit 1 ;;
+    esac
+    url="https://openpolicyagent.org/downloads/latest/opa_${os}_${arch}"
+    curl -L -o opa "$url"
+    chmod +x opa
+    export PATH="$(pwd):$PATH"
   fi
 }
 
-build_policy() {
-  local rego="$1"
-  local base="$(basename "$rego")"
-  echo -e "\n${GREEN}🔧 Processing ${base}${NC}"
+build_wasm() {
+  log "🧱 Building OPA WASM module..."
+  mkdir -p "$OUTPUT_DIR"
+  rm -f "$BUNDLE_FILE" "$WASM_FILE"
 
-  local pkg; pkg="$(parse_package "$rego")"
-  [[ -n "$pkg" ]] || { warn "No package in ${base}, skipping."; return 0; }
-  echo "  Package: ${pkg}"
+  # Create a clean temporary directory
+  TMP_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_DIR"' EXIT
 
-  echo "  Running opa check…"
-  opa check "$rego" || fail "Static check failed for ${base}"
+  # Copy only the policy file
+  cp "$POLICY_FILE" "$TMP_DIR/"
 
-  ensure_rule_exists "$rego" "allow"
-  ensure_rule_exists "$rego" "violations"
+  # Build the WASM bundle from TMP_DIR root to avoid weird absolute paths
+  log "🔨 Compiling to WASM..."
+  pushd "$TMP_DIR" >/dev/null
+  if ! opa build \
+      --target wasm \
+      --optimize=0 \
+      -o "$BUNDLE_FILE" \
+      -e "github/deploy/allow" \
+      -e "github/deploy/violations" \
+      .; then
+    log "❌ Error compiling to WASM"
+    popd >/dev/null
+    exit 1
+  fi
+  popd >/dev/null
 
-  # OPA expects entrypoints as slash paths (e.g., github/deploy/allow)
-  local pkg_slash="${pkg//./\/}"
-  local ENTRY_ALLOW="${pkg_slash}/allow"
-  local ENTRY_VIOLATIONS="${pkg_slash}/violations"
+  # 📦 Extracting WASM file (robust to leading slash or directory prefix)
+  log "📦 Extracting WASM file..."
+  wasm_entry="$(tar -tf "$BUNDLE_FILE" | grep -E '(^|/)?policy\.wasm$' | head -n1 || true)"
 
-  local name="${base%.rego}"
-  mkdir -p "${OUT_DIR}"
-
-  # Build into a temporary directory to avoid leaving extra files
-  local tmp_dir
-  tmp_dir="$(mktemp -d "${OUT_DIR}/${name}.XXXX")"
-  local bundle="${tmp_dir}/${name}.tar.gz"
-
-  echo "  Building WASM bundle…"
-  opa build -t wasm -e "${ENTRY_ALLOW}" -e "${ENTRY_VIOLATIONS}" "$rego" -o "$bundle"
-
-  echo "  Extracting bundle…"
-  tar -xzf "$bundle" -C "$tmp_dir"
-
-  [[ -f "${tmp_dir}/policy.wasm" ]] || fail "policy.wasm missing for ${base}"
-  mv "${tmp_dir}/policy.wasm" "${OUT_DIR}/${name}.wasm"
-  # Keep the bundle for OPA CLI usage
-  mv "$bundle" "${OUT_DIR}/${name}.tar.gz"
-
-  # Cleanup temp dir and do not keep tar.gz or other artifacts
-  rm -rf "$tmp_dir"
-
-  ok "Built ${OUT_DIR}/${name}.wasm"
+  if [[ -n "$wasm_entry" ]]; then
+    tar -xzf "$BUNDLE_FILE" -C "$OUTPUT_DIR" "$wasm_entry"
+    wasm_basename="$(basename "$wasm_entry")"
+    mv "$OUTPUT_DIR/$wasm_entry" "$OUTPUT_DIR/$wasm_basename" 2>/dev/null || true
+    mv "$OUTPUT_DIR/$wasm_basename" "$WASM_FILE"
+    log "✅ Build successful:"
+    log "   - WASM: $WASM_FILE"
+  else
+    log "❌ Error: policy.wasm not found in bundle"
+    log "📦 Bundle contents:"
+    tar -tf "$BUNDLE_FILE" || true
+    exit 1
+  fi
 }
 
 main() {
-  local any=false
-  for rego in "${REGO_FILES[@]}"; do
-    build_policy "$rego" && any=true
-  done
-  [[ "$any" == true ]] && ok "Done. Artifacts in: ${OUT_DIR}/" || fail "No policies compiled."
+  ensure_opa
+  build_wasm
 }
+
 main "$@"

@@ -1,115 +1,135 @@
+from __future__ import annotations
+
 import argparse
 import json
-import os
-import subprocess
 import sys
 from typing import Any, Dict, Optional
 
-from .main import evaluate_policy, PolicyError
+from .main import PolicyEngine, PolicyError, DEFAULT_ARTIFACT, load_json
 
 
-def _resolve_bundle_target(path: str) -> str:
-    """Resolve a path to a suitable OPA --bundle target.
-
-    - If .tar.gz, return as-is.
-    - If .wasm, prefer sibling .tar.gz bundle; otherwise, use directory only if it looks like an extracted bundle (has policy.wasm or manifest).
-    - If directory, return as-is.
-    """
-    if os.path.isdir(path):
-        return path
-    if path.endswith(".tar.gz"):
-        return path
-    if path.endswith(".wasm"):
-        # Prefer sibling tar.gz bundle
-        candidate = path[:-5] + ".tar.gz"
-        if os.path.exists(candidate):
-            return candidate
-        # Fallback: parent directory if it contains typical bundle files
-        d = os.path.dirname(path)
-        if os.path.isdir(d):
-            if os.path.exists(os.path.join(d, "policy.wasm")) or os.path.exists(os.path.join(d, ".manifest")):
-                return d
-        # As last resort, return original (OPA will likely error)
-        return path
-    return path
+def _printer(fmt: str):
+    def pretty(obj: Any):
+        if fmt == "json":
+            print(json.dumps(obj, ensure_ascii=False))
+        else:
+            print(json.dumps(obj, indent=2, ensure_ascii=False))
+    return pretty
 
 
-def _run_with_opa_cli(wasm_or_bundle: str, input_file: str, entrypoint: str, fmt: str) -> int:
-    bundle_target = _resolve_bundle_target(wasm_or_bundle)
-    cmd = [
-        "opa",
-        "eval",
-        "--format",
-        fmt,
-        "--entrypoint",
-        entrypoint,
-        "--bundle",
-        bundle_target,
-        "--input",
-        input_file,
-        "true",
-    ]
+def _exit_for_allow(allowed: bool, strict_exit: bool) -> int:
+    if not strict_exit:
+        return 0
+    # Conventional non-zero on deny for CI
+    return 0 if allowed else 2
+
+
+def cmd_allow(args: argparse.Namespace) -> int:
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
-        print("Error: 'opa' binary not found in PATH. Please install OPA and try again.", file=sys.stderr)
-        return 127
+        eng = PolicyEngine(args.artifact)
+        input_doc: Dict[str, Any] = load_json(args.input)
+        allowed = eng.allow(input_doc)
+        if args.output == "bool":
+            print("true" if allowed else "false")
+        else:
+            _printer(args.format)({"allow": allowed})
+        return _exit_for_allow(allowed, args.strict_exit)
+    except PolicyError as e:
+        print(f"[policy][error] {e}", file=sys.stderr)
+        return 1
 
-    if proc.returncode != 0:
-        print(proc.stderr.strip() or proc.stdout.strip(), file=sys.stderr)
-        return proc.returncode
 
-    print(proc.stdout.strip())
-    return 0
-
-
-def _run_with_python(wasm_file: str, input_file: str, entrypoint: str) -> int:
+def cmd_violations(args: argparse.Namespace) -> int:
     try:
-        with open(input_file, "r") as f:
-            data: Dict[str, Any] = json.load(f)
-    except Exception as e:
-        print(f"Error reading input file: {e}", file=sys.stderr)
-        return 2
-
-    try:
-        result = evaluate_policy(wasm_file, data, entrypoint=entrypoint)
-        print(json.dumps(result, indent=2))
+        eng = PolicyEngine(args.artifact)
+        input_doc: Dict[str, Any] = load_json(args.input)
+        v = eng.violations(input_doc)
+        _printer(args.format)({"violations": v})
+        # exit non-zero if there are violations and strict-exit requested
+        if args.strict_exit and len(v) > 0:
+            return 3
         return 0
     except PolicyError as e:
-        print(str(e), file=sys.stderr)
-        return 127
+        print(f"[policy][error] {e}", file=sys.stderr)
+        return 1
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate an OPA policy (compiled to WASM)")
-    parser.add_argument("wasm_path", help="Path to the .wasm file or bundle directory")
-    parser.add_argument("input_file", help="Path to the input JSON file")
-    parser.add_argument(
-        "--entrypoint",
-        default="data.github.deploy.allow",
-        help="Entrypoint to evaluate (e.g., data.github.deploy.allow, data.github.deploy.violations)",
+def cmd_eval(args: argparse.Namespace) -> int:
+    try:
+        eng = PolicyEngine(args.artifact)
+        input_doc: Dict[str, Any] = load_json(args.input)
+        res = eng.evaluate(args.entrypoint, input_doc).raw
+        _printer(args.format)(res)
+        return 0
+    except PolicyError as e:
+        print(f"[policy][error] {e}", file=sys.stderr)
+        return 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="policy",
+        description="CLI for evaluating OPA (WASM bundle) policies",
     )
-    parser.add_argument(
-        "--prefer",
-        choices=["python", "opa"],
-        default="python",
-        help="Prefer 'python' (opa-wasm SDK) or 'opa' (OPA CLI). Falls back automatically if preferred mode unavailable.",
+    p.add_argument(
+        "--artifact",
+        default=DEFAULT_ARTIFACT,
+        help=f"Path to bundle (.tar.gz). Default: {DEFAULT_ARTIFACT}",
     )
-    parser.add_argument(
+    p.add_argument(
         "--format",
-        default="json",
-        choices=["json", "pretty"],
-        help="OPA output format when using OPA CLI",
+        choices=["pretty", "json"],
+        default="pretty",
+        help="Output format (pretty JSON or compact JSON).",
     )
-    args = parser.parse_args()
 
-    if args.prefer == "python":
-        rc = _run_with_python(args.wasm_path, args.input_file, args.entrypoint)
-        if rc == 127:
-            rc = _run_with_opa_cli(args.wasm_path, args.input_file, args.entrypoint, args.format)
-        sys.exit(rc)
-    else:
-        rc = _run_with_opa_cli(args.wasm_path, args.input_file, args.entrypoint, args.format)
-        if rc == 127:
-            rc = _run_with_python(args.wasm_path, args.input_file, args.entrypoint)
-        sys.exit(rc)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    # allow
+    sp = sub.add_parser("allow", help="Evaluate data.github.deploy.allow → bool")
+    sp.add_argument("-i", "--input", required=True, help="Path to input JSON")
+    sp.add_argument(
+        "--output",
+        choices=["json", "bool"],
+        default="json",
+        help="Output 'bool' (true/false) or JSON {'allow': ...}",
+    )
+    sp.add_argument(
+        "--strict-exit",
+        action="store_true",
+        help="Exit 2 when deny (useful for CI gates).",
+    )
+    sp.set_defaults(func=cmd_allow)
+
+    # violations
+    sp = sub.add_parser("violations", help="Evaluate data.github.deploy.violations → list")
+    sp.add_argument("-i", "--input", required=True, help="Path to input JSON")
+    sp.add_argument(
+        "--strict-exit",
+        action="store_true",
+        help="Exit 3 when there are violations (useful for CI gates).",
+    )
+    sp.set_defaults(func=cmd_violations)
+
+    # eval (arbitrary entrypoint)
+    sp = sub.add_parser("eval", help="Evaluate arbitrary entrypoint")
+    sp.add_argument("-i", "--input", required=True, help="Path to input JSON")
+    sp.add_argument(
+        "-e",
+        "--entrypoint",
+        required=True,
+        help="Entrypoint (e.g., data.github.deploy.allow or github/deploy/allow)",
+    )
+    sp.set_defaults(func=cmd_eval)
+
+    return p
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
