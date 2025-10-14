@@ -1,0 +1,51 @@
+{
+  "policy": {
+    "version": "2.0.0",
+    "metadata": {
+      "description": "Unified policy for environment protection and PR rules",
+      "last_updated": "2025-10-14"
+    },
+    "environments": {
+      "production": {
+        "enabled": true,
+        "rules": {
+          "approvals_required": 2,
+          "allowed_branches": ["main"],
+          "require_ticket": true,
+          "ticket_pattern": "^(INC|CHG|REQ)-[0-9]{6,}$",
+          "tests_passed": true,
+          "signed_off": true,
+          "max_deployments_per_day": 5,
+          "pr_rules": {
+            "require_code_owner_review": true,
+            "required_status_checks": ["test", "build"],
+            "enforce_admins": true,
+            "required_linear_ticket": true,
+            "min_reviewers": 2,
+            "require_up_to_date_branch": true
+          }
+        }
+      },
+      "staging": {
+        "enabled": true,
+        "rules": {
+          "approvals_required": 1,
+          "allowed_branches": ["develop", "release/*"],
+          "require_ticket": true,
+          "ticket_pattern": "^[A-Z]+-[0-9]+$",
+          "tests_passed": true,
+          "signed_off": false,
+          "max_deployments_per_day": 10,
+          "pr_rules": {
+            "require_code_owner_review": false,
+            "required_status_checks": ["test"],
+            "enforce_admins": false,
+            "required_linear_ticket": true,
+            "min_reviewers": 1,
+            "require_up_to_date_branch": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -38,17 +38,17 @@ jobs:
       - name: OPA CLI — allow (rego) Just a smoke test to make sure 
         run: |
           opa eval \
-            -d .gate/github-release.rego \
+            -d .gate/github_env_protect.rego \
             --input test-inputs/production-valid.json \
             'data.github.deploy.allow'
 
       - name: OPA FMT 
         run: |
-          opa fmt -w .gate/github-release.rego
+          opa fmt -w .gate/github_env_protect.rego
 
       - name: OPA CHECK
         run: |
-          opa check .gate/github-release.rego
+          opa check .gate/github_env_protect.rego
           
       - name: Compile policy to .compile/
         run: ./scripts/compile_policy.sh
@@ -58,6 +58,6 @@ jobs:
         with:
           name: opa-compiled
           path: |
-            .compile/github-release.tar.gz
-            .compile/github-release.wasm
+            .compile/github_env_protect.tar.gz
+            .compile/github_env_protect.wasm
           if-no-files-found: error

@@ -3,10 +3,10 @@ set -euxo pipefail
 
 # --- Constants ---
 POLICY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.gate" && pwd)"
-POLICY_FILE="$POLICY_DIR/github-release.rego"
+POLICY_FILE="$POLICY_DIR/github_env_protect.rego"
 OUTPUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.compile"
-BUNDLE_FILE="$OUTPUT_DIR/github-release.tar.gz"
-WASM_FILE="$OUTPUT_DIR/github-release.wasm"
+BUNDLE_FILE="$OUTPUT_DIR/github_env_protect.tar.gz"
+WASM_FILE="$OUTPUT_DIR/github_env_protect.wasm"
 
 # --- Functions ---
 log() {

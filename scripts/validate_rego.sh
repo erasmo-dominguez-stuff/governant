@@ -17,7 +17,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE_DIR="$(dirname "$SCRIPT_DIR")/.gate"
 POLICY_FILE="$GATE_DIR/policy.json"
-REGO_FILE="$GATE_DIR/github-release.rego"
+REGO_FILE="$GATE_DIR/github_env_protect.rego"
 
 # Check if files exist
 if [ ! -f "$POLICY_FILE" ]; then
