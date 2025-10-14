@@ -21,17 +21,14 @@ jobs:
         with:
           fetch-depth: 0
       
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Set up OPA (official)
+        uses: open-policy-agent/setup-opa@v2
         with:
-          go-version: '1.21'
-      
-      - name: Install OPA
-        run: |
-          curl -L -o opa https://openpolicyagent.org/downloads/v0.55.0/opa_linux_amd64
-          chmod 755 opa
-          sudo mv opa /usr/local/bin/
-      
+          version: latest
+          
       - name: Validate PR with OPA
         id: validate
         env:
