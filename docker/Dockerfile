@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+## TODO: Replace with Official OPA Docker Image
+
 # Install OPA CLI (linux amd64)
 RUN curl -L -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64 \
     && chmod +x /usr/local/bin/opa
