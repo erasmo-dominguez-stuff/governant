@@ -1,4 +1,4 @@
-name: Validate Policy on PR
+name: Validate PR Policy
 
 on:
   pull_request:
@@ -6,13 +6,13 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
-  contents: read
   pull-requests: read
+  contents: read
   checks: write
 
 jobs:
-  validate-policy:
-    name: Validate Policy
+  validate-pr-policy:
+    name: Validate PR Policy
     runs-on: ubuntu-latest
     
     steps:
@@ -24,7 +24,7 @@ jobs:
       - name: Make scripts executable
         run: chmod +x scripts/*.sh
 
-      - name: Set up OPA (official)
+      - name: Set up OPA
         uses: open-policy-agent/setup-opa@v2
         with:
           version: latest
@@ -43,13 +43,7 @@ jobs:
             "/repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" | \
             jq 'map(select(.state == "APPROVED") | .user.login) | unique | length')
           
-          # Check if signed off (looking for /sign-off comment)
-          SIGNED_OFF=$(gh api \
-            -H "Accept: application/vnd.github.v3+json" \
-            "/repos/${{ github.repository }}/issues/$PR_NUMBER/comments" | \
-            jq 'any(.[].body; contains("/sign-off"))')
-          
-          # Get code owner reviews
+          # Get code owner approvals
           CODE_OWNER_APPROVALS=$(gh api \
             -H "Accept: application/vnd.github.v3+json" \
             "/repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" | \
@@ -58,25 +52,23 @@ jobs:
           # Create OPA input
           cat > input.json <<EOF
           {
-            "environment": "production",
+            "environment": "pr_validation",
             "ref": "${{ github.head_ref }}",
             "workflow_meta": {
               "ticket_refs": ["$(echo ${{ github.event.pull_request.title }} | grep -oE '[A-Z]+-[0-9]+' || echo '')"],
               "approvers": $APPROVALS,
               "code_owner_approvals": $CODE_OWNER_APPROVALS,
-              "signed_off": $SIGNED_OFF,
+              "signed_off": false,
               "deployments_today": 0,
               "tests_passed": ${{ github.event.pull_request.merged || 'false' }}
             }
           }
           EOF
           
-          # Run OPA validation with both policy files
+          # Run OPA validation with PR policy
           opa eval --format pretty \
-            --data .gate/github_env_protect.rego \
             --data .gate/pull_request.rego \
             --input input.json \
-            --data .gate/unified_policy.json \
             "data.policy.allow"
       
       - name: Create check run
@@ -87,17 +79,17 @@ jobs:
             const { data } = await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Policy Validation',
+              name: 'PR Policy Validation',
               head_sha: context.payload.pull_request.head.sha,
               status: 'completed',
               conclusion: steps.validate.outcome == 'success' ? 'success' : 'failure',
               output: {
-                title: 'Policy Validation',
+                title: 'PR Policy Validation',
                 summary: steps.validate.outcome == 'success' 
-                  ? 'All policy checks passed' 
-                  : 'Policy validation failed',
+                  ? 'All PR policy checks passed' 
+                  : 'PR policy validation failed',
                 text: steps.validate.outcome == 'success' 
-                  ? '✓ All policy requirements are met' 
-                  : '✗ Some policy requirements are not met. Please check the PR details.'
+                  ? '✓ All PR policy requirements are met' 
+                  : '✗ Some PR policy requirements are not met. Please check the PR details.'
               }
             })
