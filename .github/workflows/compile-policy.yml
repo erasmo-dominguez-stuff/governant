@@ -1,0 +1,63 @@
+name: Check and Compile the Rego Policy. Publish WASM if its OK
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate-policy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.10", "3.11" ]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Set up OPA (official)
+        uses: open-policy-agent/setup-opa@v3
+        with:
+          version: latest
+
+      - name: Validate Rego Policy File
+        run: ./scripts/validate_rego.sh
+
+      - name: Validate Schema
+        run: ./scripts/validate_schema.sh
+
+      # OPA CLI: evaluationg the .rego, not the bundle WASM
+      - name: OPA CLI — allow (rego) Just a smoke test to make sure 
+        run: |
+          opa eval \
+            -d .gate/github-release.rego \
+            --input test-inputs/production-valid.json \
+            'data.github.deploy.allow'
+
+      - name: OPA FMT 
+        run: |
+          opa fmt -w .gate/github-release.rego
+
+      - name: OPA CHECK
+        run: |
+          opa check .gate/github-release.rego
+          
+      - name: Compile policy to .compile/
+        run: ./scripts/compile_policy.sh
+
+      - name: Upload compiled artifacts 
+        uses: actions/upload-artifact@v4
+        with:
+          name: opa-compiled
+          path: |
+            .compile/github-release.tar.gz
+            .compile/github-release.wasm
+          if-no-files-found: error

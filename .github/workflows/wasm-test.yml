@@ -1,4 +1,4 @@
-name: OPA Policy Evaluation
+name: OPA Policy Evaluation. Wasm Testing, Compiling and Using the policy
 
 on:
   push:
@@ -65,21 +65,6 @@ jobs:
       - name: Compile policy to .compile/
         run: ./scripts/compile_policy.sh
 
-      # OPA CLI: evalúa el .rego, no el bundle WASM
-      - name: OPA CLI — allow (rego)
-        run: |
-          opa eval \
-            -d .gate/github-release.rego \
-            --input test-inputs/production-valid.json \
-            'data.github.deploy.allow'
-
-      - name: OPA CLI — violations (rego)
-        run: |
-          opa eval \
-            -d .gate/github-release.rego \
-            --input test-inputs/production-invalid.json \
-            'data.github.deploy.violations'
-
       # Python (opa-wasm) usando el bundle .tar.gz vía tu CLI
       - name: Python CLI — allow (bundle)
         run: |
@@ -92,12 +77,3 @@ jobs:
           python -m src.cli violations \
             -i test-inputs/production-invalid.json \
             --strict-exit
-
-      - name: Upload compiled artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: opa-compiled
-          path: |
-            .compile/github-release.tar.gz
-            .compile/github-release.wasm
-          if-no-files-found: error
