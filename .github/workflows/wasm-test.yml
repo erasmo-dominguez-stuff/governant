@@ -69,7 +69,7 @@ jobs:
           version: latest
 
       - name: Compile policy to .compile/
-        run: ./scripts/compile_policy.sh
+        run: ./scripts/compile_github_env_protect_policy.sh
 
   # Python (opa-wasm) using the .tar.gz bundle via your CLI
       - name: Python CLI — allow (bundle)
