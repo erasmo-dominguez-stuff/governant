@@ -5,6 +5,10 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+import atexit
+import tarfile
+import tempfile
+import shutil
 
 
 # Align default with the bundle you’re generating
@@ -118,13 +122,46 @@ class PolicyEngine:
         def can(name: str) -> bool:
             return name in params
 
+        # If this is a bundle but the runtime doesn't expose 'from_bundle',
+        # try constructor kwargs that accept a bundle-like arg. Otherwise,
+        # extract the first .wasm file from the archive and initialize the
+        # policy with the extracted wasm file (some runtime versions expect a
+        # single wasm path like 'wasm_path' or 'wasm').
         if is_bundle:
+            if can("from_bundle"):
+                return OPAPolicy.from_bundle(artifact)
             if can("bundle_path"):
                 return OPAPolicy(bundle_path=artifact)
             if can("path"):
                 return OPAPolicy(path=artifact)
             if can("bundle"):
                 return OPAPolicy(bundle=artifact)
+            # Fall back: extract a .wasm from the bundle to a temp file
+            try:
+                tmp_dir = tempfile.mkdtemp(prefix="opawasm_bundle_")
+                atexit.register(lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
+                # Support tar/tgz archives
+                with tarfile.open(artifact, "r:*") as tf:
+                    wasm_member = None
+                    for m in tf.getmembers():
+                        if m.name.endswith(".wasm"):
+                            wasm_member = m
+                            break
+                    if wasm_member is None:
+                        raise PolicyError("No .wasm file found inside bundle")
+                    # tf.extract returns None in some Python versions; build path
+                    tf.extract(wasm_member, path=tmp_dir)
+                    wasm_path = os.path.join(tmp_dir, wasm_member.name)
+            except Exception as e:
+                raise PolicyError(f"Failed to extract wasm from bundle: {e}") from e
+
+            # Now initialize OPAPolicy using a wasm path param if available
+            if can("wasm_path"):
+                return OPAPolicy(wasm_path=wasm_path)
+            if can("wasm"):
+                return OPAPolicy(wasm=wasm_path)
+            if can("path"):
+                return OPAPolicy(path=wasm_path)
         else:
             if can("path"):
                 return OPAPolicy(path=artifact)
