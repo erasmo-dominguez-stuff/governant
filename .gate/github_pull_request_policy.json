@@ -1,0 +1,43 @@
+{
+  "policy": {
+    "version": "1.0",
+    "environments": {
+      "pr_validation": {
+        "enabled": true,
+        "require_repo_environment": false,
+        "rules": {
+          "allowed_branches": ["main", "feature/*", "bugfix/*"],
+          "approvals_required": 1,
+          "signed_off": false
+        }
+      },
+      "dev": {
+        "enabled": true,
+        "require_repo_environment": true,
+        "rules": {
+          "allowed_branches": ["develop", "feature/*"],
+          "approvals_required": 1,
+          "signed_off": false
+        }
+      },
+      "staging": {
+        "enabled": true,
+        "require_repo_environment": true,
+        "rules": {
+          "allowed_branches": ["release/*", "hotfix/*"],
+          "approvals_required": 2,
+          "signed_off": true
+        }
+      },
+      "prod": {
+        "enabled": true,
+        "require_repo_environment": true,
+        "rules": {
+          "allowed_branches": ["main", "hotfix/*"],
+          "approvals_required": 2,
+          "signed_off": true
+        }
+      }
+    }
+  }
+}

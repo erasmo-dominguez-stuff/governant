@@ -1,0 +1,154 @@
+name: Validate PR Policy
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited, converted_to_draft, ready_for_review ]
+
+permissions:
+  pull-requests: read
+  contents: read
+  checks: write
+
+jobs:
+  validate-pr-policy:
+    name: Validate PR Policy
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) Checkout policy + code so we can read files from the repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2) OPA CLI for evaluation
+      - name: Set up OPA
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+
+      # 3) Ensure tooling (jq + gh)
+      - name: Ensure jq and gh
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+          if ! command -v gh >/dev/null 2>&1; then
+            type -p curl >/dev/null || sudo apt-get install curl -y
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -y
+            sudo apt-get install gh -y
+          fi
+
+      # 4) Build rich input.json purely from event/repo (no hardcoded env)
+      - name: Build OPA input from PR event
+        id: build-input
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # used by gh
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          EVENT_PATH="${GITHUB_EVENT_PATH}"
+          REPO="${{ github.repository }}"
+          PR_NUMBER="$(jq -r '.pull_request.number' "$EVENT_PATH")"
+
+          echo "PR_NUMBER=$PR_NUMBER"
+
+          # --- Extract base/head refs, draft status, labels, mergeability, files changed, requested reviewers, etc.
+          PR_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}")"
+          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref')"
+          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref')"
+          DRAFT="$(echo "$PR_JSON" | jq -r '.draft')"
+          MERGEABLE_STATE="$(echo "$PR_JSON" | jq -r '.mergeable_state // "unknown"')"
+          CHANGED_FILES="$(echo "$PR_JSON" | jq -r '.changed_files')"
+          TITLE="$(echo "$PR_JSON" | jq -r '.title')"
+          BODY="$(echo "$PR_JSON" | jq -r '.body // ""')"
+
+          # Labels as array of strings
+          LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[].name]')"
+          # Requested reviewers (logins)
+          REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[].login]')"
+
+          # --- Approvers: array of distinct logins from review events with state APPROVED
+          REVIEWS_JSON="$(gh api -H 'Accept: application/vnd.github.v3+json' "/repos/${REPO}/pulls/${PR_NUMBER}/reviews")"
+          APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED") | .user.login) | unique')"
+
+          # --- Code owner approvers (subset)
+          CODE_OWNER_APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED" and .author_association == "OWNER") | .user.login) | unique')"
+
+          # --- Repository defined environments (Settings → Environments)
+          REPO_ENVS="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/environments" | jq -c '.environments | map(.name)' || echo '[]')"
+
+          # --- Policy file from repo
+          POLICY_PATH=".gate/github_pull_request_policy.json"
+          if [ ! -f "$POLICY_PATH" ]; then
+            echo "::error file=$POLICY_PATH::Policy file not found"
+            exit 1
+          fi
+          POLICY_CONTENT="$(cat "$POLICY_PATH")"
+
+          # --- Optional branch → env mapping file
+          # Example:
+          # {
+          #   "by_base_branch": {
+          #     "main": "prod",
+          #     "develop": "staging",
+          #     "feature/*": "dev"
+          #   }
+          # }
+          MAP_PATH=".gate/env_mapping.json"
+          MAP_CONTENT="{}"
+          if [ -f "$MAP_PATH" ]; then
+            MAP_CONTENT="$(cat "$MAP_PATH")"
+          fi
+
+          # --- Resolve environment (no hardcoding):
+          # 1) A label like 'environment:prod' or 'env:staging'
+          # 2) Mapping file by base branch (supports simple '*' suffix)
+          # 3) If the policy defines exactly one environment, use it
+          # 4) Otherwise, fail with a clear error (caller must specify)
+          ENV_LABEL="$(echo "$LABELS_JSON" \
+            | jq -r '.[]? | capture("^(?<k>env(ironment)?):(?<v>.+)$")? | select(.) | .v' \
+            | head -n1 || true)"
+          ENV_FROM_LABEL="${ENV_LABEL:-}"
+
+          # Mapping by base branch:
+          ENV_FROM_MAP=""
+          if [ "$MAP_CONTENT" != "{}" ]; then
+            # Exact match
+            ENV_FROM_MAP="$(echo "$MAP_CONTENT" | jq -r --arg base "$BASE_REF" '.by_base_branch[$base] // empty')"
+            # Wildcard (suffix '*'): find first pattern that matches prefix
+            if [ -z "$ENV_FROM_MAP" ]; then
+              ENV_FROM_MAP="$(echo "$MAP_CONTENT" | jq -r --arg base "$BASE_REF" '
+                (.by_base_branch // {}) as $m
+                | ($m | to_entries[]
+                    | select(.key | endswith("*"))
+                    | select($base | startswith((.key | sub("\\*$";""))))
+                    | .value) // empty
+              ' | head -n1)"
+            fi
+          fi
+
+          # Read environments from policy
+          POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
+          POLICY_ENVS_COUNT="$(echo "$POLICY_ENVS_JSON" | jq -r 'length')"
+
+          # Decide final ENV
+          ENVIRONMENT=""
+          if [ -n "${ENV_FROM_LABEL}" ]; then
+            ENVIRONMENT="$ENV_FROM_LABEL"
+          elif [ -n "${ENV_FROM_MAP}" ]; then
+            ENVIRONMENT="$ENV_FROM_MAP"
+          elif [ "$POLICY_ENVS_COUNT" = "1" ]; then
+            ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
+          else
+            echo "::error::Unable to determine environment. Add a label like 'environment:prod', provide .gate/env_mapping.json, or make the policy have a single environment."
+            echo "Detected policy environments: $POLICY_ENVS_JSON"
+            echo "Labels: $LABELS_JSON"
+            echo "Base branch: $B
