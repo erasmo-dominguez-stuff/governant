@@ -3,7 +3,15 @@ name: Validate PR Policy
 on:
   pull_request:
     branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited, converted_to_draft, ready_for_review ]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+      - edited
+      - converted_to_draft
 
 permissions:
   pull-requests: read
@@ -70,7 +78,7 @@ jobs:
           TITLE="$(echo "$PR_JSON" | jq -r '.title')"
           BODY="$(echo "$PR_JSON" | jq -r '.body // ""')"
 
-          # Labels as array of strings
+          # Labels as array of strings (safe even if empty)
           LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[].name]')"
           # Requested reviewers (logins)
           REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[].login]')"
@@ -151,4 +159,87 @@ jobs:
             echo "::error::Unable to determine environment. Add a label like 'environment:prod', provide .gate/env_mapping.json, or make the policy have a single environment."
             echo "Detected policy environments: $POLICY_ENVS_JSON"
             echo "Labels: $LABELS_JSON"
-            echo "Base branch: $B
+            echo "Base branch: $BASE_REF"
+            exit 1
+          fi
+
+          echo "ENVIRONMENT=$ENVIRONMENT"
+
+          # --- DCO signed-off: true if all commits contain 'Signed-off-by:'
+          COMMITS_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}/commits")"
+          COMMITS_TOTAL="$(echo "$COMMITS_JSON" | jq 'length')"
+          COMMITS_WITH_SIGNOFF="$(echo "$COMMITS_JSON" | jq '[ .[].commit.message | contains("Signed-off-by:") ] | map(select(.)) | length')"
+          if [ "$COMMITS_TOTAL" -gt 0 ] && [ "$COMMITS_WITH_SIGNOFF" -eq "$COMMITS_TOTAL" ]; then
+            SIGNED_OFF=true
+          else
+            SIGNED_OFF=false
+          fi
+
+          # --- Build input.json for OPA
+          cat > input.json <<EOF
+          {
+            "environment": "$ENVIRONMENT",
+            "ref": "refs/heads/${HEAD_REF}",
+            "repo_environments": $REPO_ENVS,
+            "repo_policy": $POLICY_CONTENT,
+            "workflow_meta": {
+              "action": "${{ github.event.action }}",
+              "is_draft": $DRAFT,
+              "mergeable_state": "$MERGEABLE_STATE",
+              "requested_reviewers": $REQ_REVIEWERS_JSON,
+              "labels": $LABELS_JSON,
+              "title": $(jq -Rn --arg s "$TITLE" '$s'),
+              "body": $(jq -Rn --arg s "$BODY" '$s'),
+              "changed_files": $CHANGED_FILES,
+              "base_ref": "$BASE_REF",
+              "head_ref": "$HEAD_REF",
+              "approvers": $APPROVERS_JSON,
+              "codeowner_approvers": $CODE_OWNER_APPROVERS_JSON,
+              "signed_off": $SIGNED_OFF,
+              "pull_request": $PR_NUMBER
+            }
+          }
+          EOF
+
+          echo "Built input.json:"
+          jq '.' input.json
+
+      # 5) Evaluate with OPA and collect violations
+      - name: Evaluate OPA policy
+        id: eval
+        run: |
+          set -euo pipefail
+          # Evaluate 'allow' explicitly from JSON output so shell status doesn't mislead
+          ALLOW_VALUE="$(opa eval --format json --data .gate/github_pull_request.rego --input input.json 'data.github.pullrequest.allow' \
+            | jq -r '.result[0].expressions[0].value')"
+          echo "ALLOW=$ALLOW_VALUE" | tee -a "$GITHUB_OUTPUT"
+
+          echo "Violations (if any):"
+          opa eval --format pretty --data .gate/github_pull_request.rego --input input.json 'data.github.pullrequest.violations' || true
+
+      # 6) Create a GitHub Check Run with the outcome
+      - name: Report Check
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          POL_ALLOW: ${{ steps.eval.outputs.ALLOW }}
+        with:
+          script: |
+            const allowed = process.env.POL_ALLOW === 'true';
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'PR Policy Validation',
+              head_sha: context.payload.pull_request.head.sha,
+              status: 'completed',
+              conclusion: allowed ? 'success' : 'failure',
+              output: {
+                title: 'PR Policy Validation',
+                summary: allowed
+                  ? 'All PR policy checks passed.'
+                  : 'PR policy validation failed.',
+                text: allowed
+                  ? '✓ Policy allowed the PR based on current repository state and event data.'
+                  : '✗ Violations were detected. Open the workflow logs to see details.'
+              }
+            });
