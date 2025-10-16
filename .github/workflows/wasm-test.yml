@@ -58,7 +58,7 @@ jobs:
           uv pip install "opa-wasm[cranelift]"
 
       - name: Set up OPA (official)
-        uses: open-policy-agent/setup-opa@v3
+        uses: open-policy-agent/setup-opa@v2
         with:
           version: latest
 
