@@ -32,7 +32,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           # ❌ remove: cache: 'uv' (unsupported)
 
-      # (Opcional) Cache para uv: ruedas/artefactos
+      - name: Create uv virtualenv
+        run: |
+          # Create a uv-managed virtual environment so `uv pip` works
+          uv venv
+
+
+  # (Optional) uv cache: wheels / build artifacts
       - name: Cache uv
         uses: actions/cache@v4
         with:
@@ -65,7 +71,7 @@ jobs:
       - name: Compile policy to .compile/
         run: ./scripts/compile_policy.sh
 
-      # Python (opa-wasm) usando el bundle .tar.gz vía tu CLI
+  # Python (opa-wasm) using the .tar.gz bundle via your CLI
       - name: Python CLI — allow (bundle)
         run: |
           python -m src.cli allow \
