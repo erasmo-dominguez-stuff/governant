@@ -14,18 +14,16 @@
 
 ## 📘 Table of Contents
 
-- [Overview](#-overview)
-- [Architecture](#-architecture)
-- [Policy Layers](#-policy-layers)
-  - [1️⃣ Policy Configuration (`.gate/policy.json`)](#1️⃣-policy-configuration-gatepolicyjson)
-  - [2️⃣ Schema Validation (`.gate/schema.json`)](#2️⃣-schema-validation-gateschemajson)
-  - [3️⃣ Policy Logic (`.gate/*.rego`)](#3️⃣-policy-logic-gaterego)
-- [Example Policy Rules](#-example-policy-rules)
-- [Usage & Testing](#-usage--testing)
-- [Rego Playground Guide](#-rego-playground-guide)
-- [Common Issues](#-common-issues)
-- [Repository Layout](#-repository-layout)
-- [Next Steps](#-next-steps)
+- [Overview](#overview)
+- [Main Use Cases](#main-use-cases)
+- [Architecture](#architecture)
+- [Policy Layers](#policy-layers)
+- [Example Policy Rules](#example-policy-rules)
+- [Usage & Testing](#usage--testing)
+- [Rego Playground Guide](#rego-playground-guide)
+- [Common Issues](#common-issues)
+- [Repository Layout](#repository-layout)
+- [Next Steps](#next-steps)
 
 ---
 
@@ -37,6 +35,47 @@ It provides a robust way to enforce deployment rules and compliance checks durin
 
 It builds on the *Governant philosophy*:
 > *Define your governance declaratively, validate it automatically, and enforce it confidently.*
+
+---
+
+## 🚦 Main Use Cases
+
+Governant supports two primary governance scenarios:
+
+### 1. Pull Request Policy (`.gate/github_pull_request_policy.json`, `.gate/github_pull_request.rego`)
+
+This policy enforces rules on every pull request before it can be merged.
+
+**Compliance requirements for each PR:**
+- The PR must target an allowed branch for the selected environment.
+- The minimum number of approvers must be met.
+- If required, all commits must reference a valid ticket.
+- The PR must match ticket patterns if required.
+
+**Typical PR workflow:**
+1. Contributor opens a PR.
+2. CI workflow builds an input document from the PR event and policy.
+3. Governant evaluates the PR against the policy:
+   - If all rules pass, the PR is marked as compliant.
+   - Violations are reported in the workflow logs and as a GitHub Check.
+
+### 2. Deployment Protection Policy (`.gate/github_env_protect_policy.json`, `.gate/github_env_protect.rego`)
+
+This policy governs deployments to protected environments (e.g., `production`, `staging`).
+
+**Compliance requirements for each deployment:**
+- The deployment must target an allowed branch for the environment.
+- The required number of approvals must be present.
+- A valid ticket reference must be provided if required.
+- All tests must pass if required.
+- The number of deployments per day must not exceed the configured limit.
+
+**Typical deployment workflow:**
+1. A workflow triggers a deployment to an environment (e.g., `production`).
+2. The workflow builds an input document including environment, branch, ticket refs, approvals, test status, and deployment count.
+3. Governant evaluates the deployment against the policy:
+   - If all rules pass, the deployment proceeds.
+   - Violations are reported and the deployment is blocked.
 
 ---
 
@@ -58,7 +97,7 @@ Governant’s policy enforcement model uses a **three-layer architecture**:
 └───────────────┬──────────────┘
                 │
 ┌───────────────▼──────────────┐
-│ .gate/*.rego                  │
+│ .gate/*.rego                  │å
 │  → Policy logic               │
 │  (OPA Rules / Enforcement)    │
 └──────────────────────────────┘
@@ -68,186 +107,175 @@ Each layer serves a distinct purpose:
 
 | Layer | Responsibility | Tooling |
 |--------|----------------|---------|
-| **Configuration** | Define the governance intent (team’s rules). | JSON |
-| **Schema Validation** | Validate structure, fields, and data types. | JSON Schema / Python |
-| **Logic** | Apply governance logic, compute allow/deny decisions. | Rego (OPA) |
+# Governant — Policy Engine (OPA) for GitHub/CI
 
----
+This repository wraps OPA (Rego) policies with a small Python runtime and a CLI
+to evaluate policies from CI or programmatically.
 
-## 🧩 Policy Layers
+The README below is aligned with the files currently present in the repo.
 
-### 1️⃣ Policy Configuration (`.gate/policy.json`)
+## Key files and directories
 
-A declarative configuration that defines what a team enforces in their repo.
+- `.gate/`
+  - `github_env_protect_policy.json` — declarative policy configuration
+  - `github_env_protect_schema.json` — JSON Schema for the policy config
+  - `github_env_protect.rego` — Rego rules for environment protection
+  - `github_pull_request_policy.json` — PR policy configuration
+  - `github_pull_request.rego` — Rego rules for PR validation
+  - `github_pull_request_test.rego` — test helpers / test policy
 
-> **No logic lives here — only intent.**
+- `src/opawasm/`
+  - `main.py` — `PolicyEngine` wrapper around `opa-wasm` runtime
+  - `cli.py` — CLI entrypoint (`policy`), supports `allow`, `violations`, `eval`, `version`
 
-```json
-{
-  "policy": {
-    "version": "1.0.0",
-    "metadata": {
-      "description": "Deployment governance policy for production",
-      "last_updated": "2025-01-18"
-    },
-    "environments": {
-      "production": {
-        "enabled": true,
-        "rules": {
-          "approvals_required": 2,
-          "allowed_branches": ["main"],
-          "require_ticket": true,
-          "ticket_pattern": "^(INC|CHG|REQ)-[0-9]{6,}$",
-          "tests_passed": true,
-          "signed_off": true,
-          "max_deployments_per_day": 5
-        }
-      },
-      "staging": {
-        "enabled": true,
-        "rules": {
-          "approvals_required": 1,
-          "allowed_branches": ["main", "develop"],
-          "require_ticket": false,
-          "tests_passed": true,
-          "signed_off": false,
-          "max_deployments_per_day": 20
-        }
-      }
-    }
-  }
-}
-```
+- `scripts/`
+  - `compile_github_env_protect_policy.sh` — build the bundle into `.compile/`
+  - `validate_github_env_protect_rego.sh` — run `opa` checks for Rego files
+  - `validate_schema.sh` — validate JSON policy vs schema (uses `jq` or `check-jsonschema`)
 
----
+- `test-inputs/` — sample input documents used by tests and manual `opa eval`
+  - `production-valid.json`, `production-invalid.json`, `pr_valid.json`, `pr_no_valid.json`
 
-### 2️⃣ Schema Validation (`.gate/schema.json`)
-
-Defines the expected structure and data types for `policy.json`.  
-Ensures all policies are well-formed before policy evaluation.
-
-```bash
-jsonschema -i .gate/policy.json .gate/schema.json
-```
-
-**Example schema excerpt:**
-```json
-{
-  "type": "object",
-  "properties": {
-    "policy": {
-      "type": "object",
-      "properties": {
-        "version": { "type": "string" },
-        "environments": { "type": "object" }
-      },
-      "required": ["version", "environments"]
-    }
-  }
-}
-```
-
----
-
-### 3️⃣ Policy Logic (`.gate/*.rego`)
-
-Implements the actual enforcement rules using **Rego**, the Open Policy Agent (OPA) language.  
-Each `.rego` file defines one or more rules that determine whether a deployment is allowed.
-
-**Example: `github-release.rego`**
-```rego
-package policy.github.release
-
-default allow = false
-
-allow {
-    input.env == "production"
-    input.ref_type == "branch"
-    input.ref == "refs/heads/main"
-    input.artifact_signed
-    input.release_controlled
-    input.approvers[_]
-    count(input.approvers) >= 2
-    input.tests_passed
-    not deny[_]
-}
-
-deny[msg] {
-    input.env == "production"
-    not input.tests_passed
-    msg := "CONTROLLED_TESTED_SEGREGATED_VIOLATION: Tests must pass before deployment."
-}
-```
-
----
-
-## ⚖️ Example Policy Rules
-
-| Rule | Description |
-|------|--------------|
-| **Approval Requirements** | Minimum number of approvers required. |
-| **Branch Authorization** | Only specific branches allowed per environment. |
-| **Ticket Requirements** | Valid ticket IDs required for production. |
-| **Test Requirements** | Tests must pass before deployment. |
-| **Sign-off Requirements** | Sign-offs required for production releases. |
-| **Rate Limiting** | Limit number of daily deployments per environment. |
-
----
-
-## 🧪 Local Development & Testing
-
-### Prerequisites
+## Requirements
 
 - Python 3.8+
-- [OPA (Open Policy Agent)](https://www.openpolicyagent.org/docs/latest/#running-opa)
-- [Poetry](https://python-poetry.org/docs/#installation) (Python dependency management)
+- Poetry (recommended) or install dependencies from `pyproject.toml`
+- OPA CLI for Rego checks and manual evaluation
 
-### Quick Start
+## Quick commands
 
-1. **Clone the repository** (if you haven't already):
-   ```bash
-   git clone https://github.com/your-org/governant.git
-   cd governant
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   # Install Python dependencies
-   poetry install
-   
-   # Install OPA (if not already installed)
-   curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
-   chmod +x opa
-   sudo mv opa /usr/local/bin/
-   ```
-
-### Testing with Scripts
-
-We provide two main test scripts to simplify local development:
-
-1. **Test Everything** - Runs all tests (OPA and Python):
-   ```bash
-   ./scripts/test_local.sh
-   ```
-
-2. **OPA Tests Only** - Focus on OPA/Rego policies:
-   ```bash
-   ./scripts/test_opa.sh
-   ```
-
-### Manual Testing
-
-#### 1. Validate Schema
 ```bash
-python scripts/validate_schema.py
+# install dependencies
+poetry install
+
+# run Python tests
+poetry run pytest -v
+
+# run the CLI with a sample input (returns allow/deny)
+poetry run python -m opawasm.cli allow -i test-inputs/production-valid.json
+
+# check Rego syntax
+opa check .gate/*.rego
+
+# evaluate a specific policy with OPA (manual)
+opa eval --data .gate/github_env_protect.rego --input test-inputs/production-valid.json "data.policy.github.release.allow"
+
+# validate policy JSON against schema (script)
+./scripts/validate_schema.sh
+
+# (re)generate the WASM/tar bundle used by PolicyEngine
+./scripts/compile_github_env_protect_policy.sh
 ```
 
-#### 2. Run Python Tests
-```bash
-# Run all tests with coverage
-pytest -v --cov=src --cov-report=term-missing
+## Notes for maintainers and contributors
 
-# Run specific test file
+- `PolicyEngine` (in `src/opawasm/main.py`) expects a bundle path by default:
+  `.compile/github_env_protect.tar.gz`. If the bundle is missing, generate it
+  using `scripts/compile_github_env_protect_policy.sh`.
+
+- The `opa-wasm` Python package has changed APIs across releases. `PolicyEngine`
+  contains heuristics to initialize the runtime from either a bundle or a single
+  wasm file (e.g. `from_bundle`, `from_wasm_file`, `path`, `wasm`). If you bump
+  `opa-wasm`, update the initialization code in `main.py` accordingly.
+
+- CLI entrypoints are normalized to the `data.*` form. The CLI accepts
+  `github/deploy/allow`, `github.deploy.allow` or `data.github.deploy.allow`.
+
+- For CI gates use `--strict-exit` with `allow`/`violations` to produce a
+  non-zero exit code when the policy denies or returns violations.
+
+## How to run validation locally
+
+1. Run unit tests:
+
+```bash
+poetry run pytest -v
+```
+
+2. Validate Rego files and schema before committing:
+
+```bash
+./scripts/validate_github_env_protect_rego.sh
+./scripts/validate_schema.sh
+```
+
+3. Rebuild the bundle used by `PolicyEngine` if you changed policies:
+
+```bash
+./scripts/compile_github_env_protect_policy.sh
+```
+
+## Example GitHub Actions snippet (minimal)
+
+This example uses `opa` directly for a quick check. Replace with the CLI
+(`policy allow ... --artifact ... --strict-exit`) if you prefer to run the
+Python wrapper in CI.
+
+```yaml
+jobs:
+  policy-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Governance Policy
+        run: |
+          opa eval --data .gate/github_env_protect.rego \
+                   --input test-inputs/production-valid.json \
+                   "data.policy.github.release.allow"
+```
+
+## Rego Playground
+
+Use https://play.openpolicyagent.org/ to iteratively test policies. Query
+using `data.policy.*` (for example `data.policy.github.release.allow`).
+
+## Example inputs
+
+Valid example (short):
+
+```json
+{
+  "env": "production",
+  "ref_type": "branch",
+  "ref": "refs/heads/main",
+  "approvers": ["user1", "user2"],
+  "tests_passed": true
+}
+```
+
+Invalid example (short):
+
+```json
+{
+  "env": "production",
+  "ref": "refs/heads/feature-branch",
+  "approvers": ["user1"],
+  "tests_passed": false
+}
+```
+
+## Common issues
+
+| Type | Description | Resolution |
+|------|-------------|------------|
+| Syntax | Rego syntax errors | `opa check .gate/*.rego` |
+| Logic | Wrong conditions or missing input fields | Use Playground + tests |
+| Input | Invalid JSON structure or types | Validate with `jsonschema` or `./scripts/validate_schema.sh` |
+
+## Repo layout (summary)
+
+```
+├── .gate/
+├── scripts/
+├── src/opawasm/
+├── test-inputs/
+└── .github/
+```
+
+---
+
+MIT © 2025 Erasmo Domínguez
+
 pytest tests/unit/test_validators.py -v
 
 # Run with coverage report

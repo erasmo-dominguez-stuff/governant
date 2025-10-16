@@ -175,11 +175,31 @@ jobs:
             SIGNED_OFF=false
           fi
 
+          # --- Head commit / repo info
+          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha')"
+          HEAD_REPO_FULLNAME="$(echo "$PR_JSON" | jq -r '.head.repo.full_name')"
+          HEAD_REPO_FORK="$(echo "$PR_JSON" | jq -r '.head.repo.fork')"
+          PR_AUTHOR_ASSOC="$(echo "$PR_JSON" | jq -r '.author_association')"
+
+          # --- Files changed list (array of filenames)
+          FILES_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}/files" | jq -c '[.[] | .filename]')"
+
+          # --- Per-commit verification (GPG) info
+          COMMIT_VERIFICATIONS_JSON="$(echo "$COMMITS_JSON" | jq -c 'map({sha: .sha, verified: (.commit.verification.verified // false), url: .html_url})')"
+
+          # --- Combined commit status and check runs for head sha
+          COMBINED_STATUS_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/commits/${HEAD_SHA}/status" || echo '{"state":"unknown"}')"
+          COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
+          CHECK_RUNS_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" | jq -c '.check_runs | map({name: .name, status: .status, conclusion: .conclusion})' || echo '[]')"
+
           # --- Build input.json for OPA
           cat > input.json <<EOF
           {
             "environment": "$ENVIRONMENT",
             "ref": "refs/heads/${HEAD_REF}",
+            "head_sha": "$HEAD_SHA",
+            "head_repo_full_name": "$HEAD_REPO_FULLNAME",
+            "head_repo_fork": $HEAD_REPO_FORK,
             "repo_environments": $REPO_ENVS,
             "repo_policy": $POLICY_CONTENT,
             "workflow_meta": {
@@ -193,9 +213,16 @@ jobs:
               "changed_files": $CHANGED_FILES,
               "base_ref": "$BASE_REF",
               "head_ref": "$HEAD_REF",
+              "head_sha": "$HEAD_SHA",
               "approvers": $APPROVERS_JSON,
               "codeowner_approvers": $CODE_OWNER_APPROVERS_JSON,
               "signed_off": $SIGNED_OFF,
+              "commit_verifications": $COMMIT_VERIFICATIONS_JSON,
+              "combined_status": $COMBINED_STATUS_JSON,
+              "combined_state": "$COMBINED_STATE",
+              "check_runs": $CHECK_RUNS_JSON,
+              "files_changed_list": $FILES_JSON,
+              "pr_author_association": "$PR_AUTHOR_ASSOC",
               "pull_request": $PR_NUMBER
             }
           }
