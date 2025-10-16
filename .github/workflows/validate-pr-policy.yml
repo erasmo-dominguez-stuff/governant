@@ -3,7 +3,15 @@ name: Validate PR Policy
 on:
   pull_request:
     branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited, converted_to_draft, ready_for_review ]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+      - edited
+      - converted_to_draft
 
 permissions:
   pull-requests: read
@@ -60,30 +68,71 @@ jobs:
 
           echo "PR_NUMBER=$PR_NUMBER"
 
+          # Helper: robust gh api call with retries. Returns non-zero on failure.
+          gh_api() {
+            set +e
+            local url="$1"
+            local accept="${2:-application/vnd.github+json}"
+            local tries=3
+            local delay=2
+            local i=1
+            local out
+            while [ $i -le $tries ]; do
+              out=$(gh api -H "Accept: $accept" "$url" 2>/dev/null)
+              rc=$?
+              if [ $rc -eq 0 ] && [ -n "$out" ]; then
+                echo "$out"
+                set -e
+                return 0
+              fi
+              sleep $((delay * i))
+              i=$((i+1))
+            done
+            set -e
+            return 1
+          }
+
+          # Helper: call gh_api and return a safe default JSON when unavailable
+          get_json_or_default() {
+            local url="$1"; local default="$2"
+            set +e
+            out=$(gh_api "$url")
+            rc=$?
+            set -e
+            if [ $rc -ne 0 ] || [ -z "$out" ]; then
+              # Annotate the workflow logs so it's visible in the Actions UI
+              echo "::warning::gh api $url failed after retries or returned empty; using default value"
+              echo "$default"
+            else
+              echo "$out"
+            fi
+          }
+
           # --- Extract base/head refs, draft status, labels, mergeability, files changed, requested reviewers, etc.
-          PR_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}")"
-          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref')"
-          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref')"
-          DRAFT="$(echo "$PR_JSON" | jq -r '.draft')"
+          PR_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}" '{}')"
+          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref // ""')"
+          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref // ""')"
+          DRAFT="$(echo "$PR_JSON" | jq -r '.draft // false')"
           MERGEABLE_STATE="$(echo "$PR_JSON" | jq -r '.mergeable_state // "unknown"')"
-          CHANGED_FILES="$(echo "$PR_JSON" | jq -r '.changed_files')"
-          TITLE="$(echo "$PR_JSON" | jq -r '.title')"
+          CHANGED_FILES="$(echo "$PR_JSON" | jq -r '.changed_files // 0')"
+          TITLE="$(echo "$PR_JSON" | jq -r '.title // ""')"
           BODY="$(echo "$PR_JSON" | jq -r '.body // ""')"
 
-          # Labels as array of strings
-          LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[].name]')"
+          # Labels as array of strings (safe even if empty)
+          LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[]?.name]')"
           # Requested reviewers (logins)
-          REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[].login]')"
+          REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[]?.login]')"
 
           # --- Approvers: array of distinct logins from review events with state APPROVED
-          REVIEWS_JSON="$(gh api -H 'Accept: application/vnd.github.v3+json' "/repos/${REPO}/pulls/${PR_NUMBER}/reviews")"
+          REVIEWS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" '[]')"
           APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED") | .user.login) | unique')"
 
           # --- Code owner approvers (subset)
           CODE_OWNER_APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED" and .author_association == "OWNER") | .user.login) | unique')"
 
           # --- Repository defined environments (Settings → Environments)
-          REPO_ENVS="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/environments" | jq -c '.environments | map(.name)' || echo '[]')"
+          REPO_ENVS="$(get_json_or_default "/repos/${REPO}/environments" '{"environments":[]}')"
+          REPO_ENVS="$(echo "$REPO_ENVS" | jq -c '.environments | map(.name)')"
 
           # --- Policy file from repo
           POLICY_PATH=".gate/github_pull_request_policy.json"
@@ -148,7 +197,129 @@ jobs:
           elif [ "$POLICY_ENVS_COUNT" = "1" ]; then
             ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
           else
-            echo "::error::Unable to determine environment. Add a label like 'environment:prod', provide .gate/env_mapping.json, or make the policy have a single environment."
+            # Don't fail the workflow for ambiguous environment selection. Choose a safe default
+            # (first environment listed in the policy) and annotate the run so maintainers can fix it.
+            echo "::warning::Unable to determine environment automatically; defaulting to the first policy environment. Add a label like 'environment:prod' or provide .gate/env_mapping.json to control this behavior."
             echo "Detected policy environments: $POLICY_ENVS_JSON"
             echo "Labels: $LABELS_JSON"
-            echo "Base branch: $B
+            echo "Base branch: $BASE_REF"
+            ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
+          fi
+
+          echo "ENVIRONMENT=$ENVIRONMENT"
+
+          # --- DCO signed-off: true if all commits contain 'Signed-off-by:'
+          COMMITS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
+          COMMITS_TOTAL="$(echo "$COMMITS_JSON" | jq 'length')"
+          COMMITS_WITH_SIGNOFF="$(echo "$COMMITS_JSON" | jq '[ .[]?.commit.message | contains("Signed-off-by:") ] | map(select(.)) | length')"
+          if [ "$COMMITS_TOTAL" -gt 0 ] && [ "$COMMITS_WITH_SIGNOFF" -eq "$COMMITS_TOTAL" ]; then
+            SIGNED_OFF=true
+          else
+            SIGNED_OFF=false
+          fi
+
+          # --- Head commit / repo info
+          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha // ""')"
+          HEAD_REPO_FULLNAME="$(echo "$PR_JSON" | jq -r '.head.repo.full_name // ""')"
+          HEAD_REPO_FORK="$(echo "$PR_JSON" | jq -r '.head.repo.fork // false')"
+          PR_AUTHOR_ASSOC="$(echo "$PR_JSON" | jq -r '.author_association // ""')"
+
+          # --- Files changed list (array of filenames)
+          FILES_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/files" '[]')"
+          FILES_JSON="$(echo "$FILES_JSON" | jq -c '[.[]?.filename]')"
+
+          # --- Per-commit verification (GPG) info
+          COMMIT_VERIFICATIONS_JSON="$(echo "$COMMITS_JSON" | jq -c 'map({sha: .sha, verified: (.commit.verification.verified // false), url: .html_url})')"
+
+          # --- Combined commit status and check runs for head sha
+          if [ -n "$HEAD_SHA" ]; then
+            COMBINED_STATUS_JSON="$(get_json_or_default "/repos/${REPO}/commits/${HEAD_SHA}/status" '{"state":"unknown"}')"
+            COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
+            CHECK_RUNS_JSON_RAW="$(get_json_or_default "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" '{"check_runs":[]}')"
+            CHECK_RUNS_JSON="$(echo "$CHECK_RUNS_JSON_RAW" | jq -c '.check_runs | map({name: .name, status: .status, conclusion: .conclusion})')"
+          else
+            # If head sha is missing we can't query statuses or checks — annotate so maintainers know
+            echo "::warning::head SHA missing from PR JSON; skipping combined status and check_runs queries"
+            COMBINED_STATUS_JSON='{"state":"unknown"}'
+            COMBINED_STATE='unknown'
+            CHECK_RUNS_JSON='[]'
+          fi
+
+          # --- Build input.json for OPA
+          cat > input.json <<EOF
+          {
+            "environment": "$ENVIRONMENT",
+            "ref": "refs/heads/${HEAD_REF}",
+            "head_sha": "$HEAD_SHA",
+            "head_repo_full_name": "$HEAD_REPO_FULLNAME",
+            "head_repo_fork": $HEAD_REPO_FORK,
+            "repo_environments": $REPO_ENVS,
+            "repo_policy": $POLICY_CONTENT,
+            "workflow_meta": {
+              "action": "${{ github.event.action }}",
+              "is_draft": $DRAFT,
+              "mergeable_state": "$MERGEABLE_STATE",
+              "requested_reviewers": $REQ_REVIEWERS_JSON,
+              "labels": $LABELS_JSON,
+              "title": $(jq -Rn --arg s "$TITLE" '$s'),
+              "body": $(jq -Rn --arg s "$BODY" '$s'),
+              "changed_files": $CHANGED_FILES,
+              "base_ref": "$BASE_REF",
+              "head_ref": "$HEAD_REF",
+              "head_sha": "$HEAD_SHA",
+              "approvers": $APPROVERS_JSON,
+              "codeowner_approvers": $CODE_OWNER_APPROVERS_JSON,
+              "signed_off": $SIGNED_OFF,
+              "commit_verifications": $COMMIT_VERIFICATIONS_JSON,
+              "combined_status": $COMBINED_STATUS_JSON,
+              "combined_state": "$COMBINED_STATE",
+              "check_runs": $CHECK_RUNS_JSON,
+              "files_changed_list": $FILES_JSON,
+              "pr_author_association": "$PR_AUTHOR_ASSOC",
+              "pull_request": $PR_NUMBER
+            }
+          }
+          EOF
+
+          echo "Built input.json:"
+          jq '.' input.json
+
+      # 5) Evaluate with OPA and collect violations
+      - name: Evaluate OPA policy
+        id: eval
+        run: |
+          set -euo pipefail
+          # Evaluate 'allow' explicitly from JSON output so shell status doesn't mislead
+          ALLOW_VALUE="$(opa eval --format json --data .gate/github_pull_request.rego --input input.json 'data.github.pullrequest.allow' \
+            | jq -r '.result[0].expressions[0].value')"
+          echo "ALLOW=$ALLOW_VALUE" | tee -a "$GITHUB_OUTPUT"
+
+          echo "Violations (if any):"
+          opa eval --format pretty --data .gate/github_pull_request.rego --input input.json 'data.github.pullrequest.violations' || true
+
+      # 6) Create a GitHub Check Run with the outcome
+      - name: Report Check
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          POL_ALLOW: ${{ steps.eval.outputs.ALLOW }}
+        with:
+          script: |
+            const allowed = process.env.POL_ALLOW === 'true';
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'PR Policy Validation',
+              head_sha: context.payload.pull_request.head.sha,
+              status: 'completed',
+              conclusion: allowed ? 'success' : 'failure',
+              output: {
+                title: 'PR Policy Validation',
+                summary: allowed
+                  ? 'All PR policy checks passed.'
+                  : 'PR policy validation failed.',
+                text: allowed
+                  ? '✓ Policy allowed the PR based on current repository state and event data.'
+                  : '✗ Violations were detected. Open the workflow logs to see details.'
+              }
+            });

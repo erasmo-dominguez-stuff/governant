@@ -3,8 +3,17 @@ set -euo pipefail
 
 # --- Config ---
 PYTHON_BIN="${PYTHON_BIN:-python}"
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT_DIR="${PROJECT_ROOT}/scripts"
+SCRIPT_DIR_DEFAULT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# If the script is inside the repo (e.g., scripts/), walk up until we find pyproject.toml
+PROJECT_ROOT="$SCRIPT_DIR_DEFAULT"
+while [ "$PROJECT_ROOT" != "/" ] && [ ! -f "$PROJECT_ROOT/pyproject.toml" ]; do
+  PROJECT_ROOT="$(dirname "$PROJECT_ROOT")"
+done
+if [ "$PROJECT_ROOT" = "/" ]; then
+  # Fallback to script dir if pyproject.toml wasn't found
+  PROJECT_ROOT="$SCRIPT_DIR_DEFAULT"
+fi
+# SCRIPT_DIR is intentionally omitted; use PROJECT_ROOT/scripts when needed
 VALID_INPUT="${PROJECT_ROOT}/test-inputs/production-valid.json"
 INVALID_INPUT="${PROJECT_ROOT}/test-inputs/production-invalid.json"
 WASM_BUNDLE="${PROJECT_ROOT}/.compile/github_env_protect.tar.gz"

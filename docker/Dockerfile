@@ -1,5 +1,11 @@
 ###############################################
-# Builder: install OPA and compile the policy #
+# Stage: obtain official OPA binary (from upstream image)
+###############################################
+FROM openpolicyagent/opa:latest AS opa
+
+
+###############################################
+# Builder: compile the policy using Python image
 ###############################################
 FROM python:3.11-slim AS builder
 
@@ -14,22 +20,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-## TODO: Replace with Official OPA Docker Image
-
-# Install OPA CLI (linux amd64)
-RUN curl -L -o /usr/local/bin/opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64 \
-    && chmod +x /usr/local/bin/opa
+# Copy the opa binary from the official image so the builder has the same version
+COPY --from=opa /opa /usr/local/bin/opa
+RUN chmod +x /usr/local/bin/opa || true
 
 # Copy only what's needed to compile the policy
 COPY .gate/ ./.gate/
 COPY scripts/ ./scripts/
 
-# Compile policy -> outputs in .compile/<name>.wasm and .compile/<name>.tar.gz
-RUN chmod +x ./scripts/compile_policy.sh \
-    && ./scripts/compile_policy.sh
+# Ensure compile script is executable and run it
+RUN chmod +x ./scripts/compile_github_env_protect_policy.sh \
+    && ./scripts/compile_github_env_protect_policy.sh
+
 
 ###############################################
-# Runtime: minimal Python + compiled artifacts #
+# Runtime: minimal Python runtime with CLI + opa
 ###############################################
 FROM python:3.11-slim AS runtime
 
@@ -37,24 +42,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv
 
-RUN python -m venv $VIRTUAL_ENV \
-    && apt-get update && apt-get install -y --no-install-recommends \
-       ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m venv $VIRTUAL_ENV
 
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /app
 
-# Copy app code and compiled artifacts
+# Copy the Python package and compiled policy bundle from builder
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 COPY --from=builder /app/.compile/ ./.compile/
 
-# Install app (for CLI entrypoint)
+# Copy opa binary from official image (keeps runtime aligned with builder)
+COPY --from=opa /opa /usr/local/bin/opa
+RUN chmod +x /usr/local/bin/opa || true
+
+# Install the app and runtime dependency
 RUN pip install --no-cache-dir -e . \
     && pip install --no-cache-dir "opa-wasm[cranelift]"
 
-# Default entrypoint to the CLI; users pass wasm path and input path
-ENTRYPOINT ["python", "-m", "src.opawasm"]
-CMD [".compile/github-release.wasm", "/input.json", "--entrypoint", "data.github.deploy.allow"]
+# Expose a small helper: run the Python CLI as the container entrypoint.
+# Usage examples:
+#  docker run --rm -v $(pwd)/input.json:/input.json image:tag --artifact ./.compile/github_env_protect.tar.gz allow -i /input.json --output bool
+ENTRYPOINT ["python", "-m", "opawasm.cli"]
+CMD ["--artifact", ".compile/github_env_protect.tar.gz", "allow", "-i", "/input.json", "--output", "bool"]

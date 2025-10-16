@@ -3,11 +3,15 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import atexit
+import tarfile
+import tempfile
+import shutil
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
-# Align default with the bundle you’re generating
+# Align default with the bundle you're generating
 DEFAULT_ARTIFACT = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
     ".compile",
@@ -115,16 +119,57 @@ class PolicyEngine:
 
         # 2) Fall back to constructor kwargs based on signature
         params = inspect.signature(OPAPolicy.__init__).parameters
+
         def can(name: str) -> bool:
             return name in params
 
+        # If this is a bundle but the runtime doesn't expose 'from_bundle',
+        # try constructor kwargs that accept a bundle-like arg. Otherwise,
+        # extract the first .wasm file from the archive and initialize the
+        # policy with the extracted wasm file (some runtime versions expect a
+        # single wasm path like 'wasm_path' or 'wasm').
         if is_bundle:
+            if can("from_bundle"):
+                return OPAPolicy.from_bundle(artifact)
             if can("bundle_path"):
                 return OPAPolicy(bundle_path=artifact)
             if can("path"):
                 return OPAPolicy(path=artifact)
             if can("bundle"):
                 return OPAPolicy(bundle=artifact)
+
+            # Fall back: extract a .wasm from the bundle to a temp file
+            try:
+                tmp_dir = tempfile.mkdtemp(prefix="opawasm_bundle_")
+                atexit.register(lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
+                # Support tar/tgz archives. Extract the wasm content safely by
+                # reading the member and writing it to a temp file using basename
+                # (this prevents absolute paths inside the archive from writing
+                # to arbitrary locations like '/').
+                with tarfile.open(artifact, "r:*") as tf:
+                    wasm_member = None
+                    for m in tf.getmembers():
+                        if m.name.endswith(".wasm"):
+                            wasm_member = m
+                            break
+                    if wasm_member is None:
+                        raise PolicyError("No .wasm file found inside bundle")
+                    member_fh = tf.extractfile(wasm_member)
+                    if member_fh is None:
+                        raise PolicyError("Failed to read wasm member from bundle")
+                    wasm_path = os.path.join(tmp_dir, os.path.basename(wasm_member.name))
+                    with open(wasm_path, "wb") as out_fh:
+                        shutil.copyfileobj(member_fh, out_fh)
+            except Exception as e:
+                raise PolicyError(f"Failed to extract wasm from bundle: {e}") from e
+
+            # Now initialize OPAPolicy using a wasm path param if available
+            if can("wasm_path"):
+                return OPAPolicy(wasm_path=wasm_path)
+            if can("wasm"):
+                return OPAPolicy(wasm=wasm_path)
+            if can("path"):
+                return OPAPolicy(path=wasm_path)
         else:
             if can("path"):
                 return OPAPolicy(path=artifact)

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Validate policy.json against Rego policy using OPA
+# Validate github_env_protect_policy.json against Rego policy using OPA
 
 # Colors
 GREEN='\033[0;32m'
@@ -16,12 +16,12 @@ fi
 # Set default file paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE_DIR="$(dirname "$SCRIPT_DIR")/.gate"
-POLICY_FILE="$GATE_DIR/policy.json"
+POLICY_FILE="$GATE_DIR/github_env_protect_policy.json"
 REGO_FILE="$GATE_DIR/github_env_protect.rego"
 
 # Check if files exist
 if [ ! -f "$POLICY_FILE" ]; then
-    echo -e "${RED}Error: policy.json not found at $POLICY_FILE${NC}"
+    echo -e "${RED}Error: github_env_protect_policy.json not found at $POLICY_FILE${NC}"
     exit 1
 fi
 
