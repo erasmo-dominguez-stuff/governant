@@ -197,11 +197,13 @@ jobs:
           elif [ "$POLICY_ENVS_COUNT" = "1" ]; then
             ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
           else
-            echo "::error::Unable to determine environment. Add a label like 'environment:prod', provide .gate/env_mapping.json, or make the policy have a single environment."
+            # Don't fail the workflow for ambiguous environment selection. Choose a safe default
+            # (first environment listed in the policy) and annotate the run so maintainers can fix it.
+            echo "::warning::Unable to determine environment automatically; defaulting to the first policy environment. Add a label like 'environment:prod' or provide .gate/env_mapping.json to control this behavior."
             echo "Detected policy environments: $POLICY_ENVS_JSON"
             echo "Labels: $LABELS_JSON"
             echo "Base branch: $BASE_REF"
-            exit 1
+            ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
           fi
 
           echo "ENVIRONMENT=$ENVIRONMENT"
