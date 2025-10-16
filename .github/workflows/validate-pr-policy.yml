@@ -68,30 +68,71 @@ jobs:
 
           echo "PR_NUMBER=$PR_NUMBER"
 
+          # Helper: robust gh api call with retries. Returns non-zero on failure.
+          gh_api() {
+            set +e
+            local url="$1"
+            local accept="${2:-application/vnd.github+json}"
+            local tries=3
+            local delay=2
+            local i=1
+            local out
+            while [ $i -le $tries ]; do
+              out=$(gh api -H "Accept: $accept" "$url" 2>/dev/null)
+              rc=$?
+              if [ $rc -eq 0 ] && [ -n "$out" ]; then
+                echo "$out"
+                set -e
+                return 0
+              fi
+              sleep $((delay * i))
+              i=$((i+1))
+            done
+            set -e
+            return 1
+          }
+
+          # Helper: call gh_api and return a safe default JSON when unavailable
+          get_json_or_default() {
+            local url="$1"; local default="$2"
+            set +e
+            out=$(gh_api "$url")
+            rc=$?
+            set -e
+            if [ $rc -ne 0 ] || [ -z "$out" ]; then
+              # Annotate the workflow logs so it's visible in the Actions UI
+              echo "::warning::gh api $url failed after retries or returned empty; using default value"
+              echo "$default"
+            else
+              echo "$out"
+            fi
+          }
+
           # --- Extract base/head refs, draft status, labels, mergeability, files changed, requested reviewers, etc.
-          PR_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}")"
-          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref')"
-          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref')"
-          DRAFT="$(echo "$PR_JSON" | jq -r '.draft')"
+          PR_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}" '{}')"
+          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref // ""')"
+          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref // ""')"
+          DRAFT="$(echo "$PR_JSON" | jq -r '.draft // false')"
           MERGEABLE_STATE="$(echo "$PR_JSON" | jq -r '.mergeable_state // "unknown"')"
-          CHANGED_FILES="$(echo "$PR_JSON" | jq -r '.changed_files')"
-          TITLE="$(echo "$PR_JSON" | jq -r '.title')"
+          CHANGED_FILES="$(echo "$PR_JSON" | jq -r '.changed_files // 0')"
+          TITLE="$(echo "$PR_JSON" | jq -r '.title // ""')"
           BODY="$(echo "$PR_JSON" | jq -r '.body // ""')"
 
           # Labels as array of strings (safe even if empty)
-          LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[].name]')"
+          LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[]?.name]')"
           # Requested reviewers (logins)
-          REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[].login]')"
+          REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[]?.login]')"
 
           # --- Approvers: array of distinct logins from review events with state APPROVED
-          REVIEWS_JSON="$(gh api -H 'Accept: application/vnd.github.v3+json' "/repos/${REPO}/pulls/${PR_NUMBER}/reviews")"
+          REVIEWS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" '[]')"
           APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED") | .user.login) | unique')"
 
           # --- Code owner approvers (subset)
           CODE_OWNER_APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED" and .author_association == "OWNER") | .user.login) | unique')"
 
           # --- Repository defined environments (Settings → Environments)
-          REPO_ENVS="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/environments" | jq -c '.environments | map(.name)' || echo '[]')"
+          REPO_ENVS="$(get_json_or_default "/repos/${REPO}/environments" '{"environments":[]}')"
+          REPO_ENVS="$(echo "$REPO_ENVS" | jq -c '.environments | map(.name)')"
 
           # --- Policy file from repo
           POLICY_PATH=".gate/github_pull_request_policy.json"
@@ -166,9 +207,9 @@ jobs:
           echo "ENVIRONMENT=$ENVIRONMENT"
 
           # --- DCO signed-off: true if all commits contain 'Signed-off-by:'
-          COMMITS_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}/commits")"
+          COMMITS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
           COMMITS_TOTAL="$(echo "$COMMITS_JSON" | jq 'length')"
-          COMMITS_WITH_SIGNOFF="$(echo "$COMMITS_JSON" | jq '[ .[].commit.message | contains("Signed-off-by:") ] | map(select(.)) | length')"
+          COMMITS_WITH_SIGNOFF="$(echo "$COMMITS_JSON" | jq '[ .[]?.commit.message | contains("Signed-off-by:") ] | map(select(.)) | length')"
           if [ "$COMMITS_TOTAL" -gt 0 ] && [ "$COMMITS_WITH_SIGNOFF" -eq "$COMMITS_TOTAL" ]; then
             SIGNED_OFF=true
           else
@@ -176,21 +217,31 @@ jobs:
           fi
 
           # --- Head commit / repo info
-          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha')"
-          HEAD_REPO_FULLNAME="$(echo "$PR_JSON" | jq -r '.head.repo.full_name')"
-          HEAD_REPO_FORK="$(echo "$PR_JSON" | jq -r '.head.repo.fork')"
-          PR_AUTHOR_ASSOC="$(echo "$PR_JSON" | jq -r '.author_association')"
+          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha // ""')"
+          HEAD_REPO_FULLNAME="$(echo "$PR_JSON" | jq -r '.head.repo.full_name // ""')"
+          HEAD_REPO_FORK="$(echo "$PR_JSON" | jq -r '.head.repo.fork // false')"
+          PR_AUTHOR_ASSOC="$(echo "$PR_JSON" | jq -r '.author_association // ""')"
 
           # --- Files changed list (array of filenames)
-          FILES_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/pulls/${PR_NUMBER}/files" | jq -c '[.[] | .filename]')"
+          FILES_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/files" '[]')"
+          FILES_JSON="$(echo "$FILES_JSON" | jq -c '[.[]?.filename]')"
 
           # --- Per-commit verification (GPG) info
           COMMIT_VERIFICATIONS_JSON="$(echo "$COMMITS_JSON" | jq -c 'map({sha: .sha, verified: (.commit.verification.verified // false), url: .html_url})')"
 
           # --- Combined commit status and check runs for head sha
-          COMBINED_STATUS_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/commits/${HEAD_SHA}/status" || echo '{"state":"unknown"}')"
-          COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
-          CHECK_RUNS_JSON="$(gh api -H 'Accept: application/vnd.github+json' "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" | jq -c '.check_runs | map({name: .name, status: .status, conclusion: .conclusion})' || echo '[]')"
+          if [ -n "$HEAD_SHA" ]; then
+            COMBINED_STATUS_JSON="$(get_json_or_default "/repos/${REPO}/commits/${HEAD_SHA}/status" '{"state":"unknown"}')"
+            COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
+            CHECK_RUNS_JSON_RAW="$(get_json_or_default "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" '{"check_runs":[]}')"
+            CHECK_RUNS_JSON="$(echo "$CHECK_RUNS_JSON_RAW" | jq -c '.check_runs | map({name: .name, status: .status, conclusion: .conclusion})')"
+          else
+            # If head sha is missing we can't query statuses or checks — annotate so maintainers know
+            echo "::warning::head SHA missing from PR JSON; skipping combined status and check_runs queries"
+            COMBINED_STATUS_JSON='{"state":"unknown"}'
+            COMBINED_STATE='unknown'
+            CHECK_RUNS_JSON='[]'
+          fi
 
           # --- Build input.json for OPA
           cat > input.json <<EOF
