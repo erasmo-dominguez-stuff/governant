@@ -1,5 +1,5 @@
 #!/bin/bash
-# Validate policy.json against schema.json using jq
+# Validate github_env_protect_policy.json against github_env_protect_schema.json using jq
 
 # Colors
 GREEN='\033[0;32m'
@@ -16,17 +16,17 @@ fi
 # Set default file paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE_DIR="$(dirname "$SCRIPT_DIR")/.gate"
-POLICY_FILE="$GATE_DIR/policy.json"
-SCHEMA_FILE="$GATE_DIR/schema.json"
+POLICY_FILE="$GATE_DIR/github_env_protect_policy.json"
+SCHEMA_FILE="$GATE_DIR/github_env_protect_schema.json"
 
 # Check if files exist
 if [ ! -f "$POLICY_FILE" ]; then
-    echo -e "${RED}Error: policy.json not found at $POLICY_FILE${NC}"
+    echo -e "${RED}Error: github_env_protect_policy.json not found at $POLICY_FILE${NC}"
     exit 1
 fi
 
 if [ ! -f "$SCHEMA_FILE" ]; then
-    echo -e "${RED}Error: schema.json not found at $SCHEMA_FILE${NC}"
+    echo -e "${RED}Error: github_env_protect_schema.json not found at $SCHEMA_FILE${NC}"
     exit 1
 fi
 

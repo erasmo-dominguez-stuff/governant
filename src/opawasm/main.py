@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 
+# Align default with the bundle you’re generating
 DEFAULT_ARTIFACT = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
     ".compile",
-    "github-release.tar.gz",
+    "github_env_protect.tar.gz",
 )
 
 
@@ -98,8 +100,44 @@ class PolicyEngine:
         if not os.path.isfile(self.artifact):
             raise PolicyError(f"Bundle not found: {self.artifact}")
         OPAPolicy = _require_opa_wasm()
-        # Load bundle (includes policy.wasm, data.json and manifest)
-        self._policy = OPAPolicy(bundle=self.artifact)
+        self._policy = self._load_policy(OPAPolicy, self.artifact)
+
+    def _load_policy(self, OPAPolicy, artifact: str):
+        """Support multiple opa-wasm Python APIs across versions."""
+        # Heuristic: bundle vs single wasm
+        is_bundle = artifact.endswith((".tar.gz", ".tgz", ".tar", ".zip"))
+
+        # 1) Prefer classmethods if available
+        if is_bundle and hasattr(OPAPolicy, "from_bundle"):
+            return OPAPolicy.from_bundle(artifact)
+        if (not is_bundle) and hasattr(OPAPolicy, "from_wasm_file"):
+            return OPAPolicy.from_wasm_file(artifact)
+
+        # 2) Fall back to constructor kwargs based on signature
+        params = inspect.signature(OPAPolicy.__init__).parameters
+        def can(name: str) -> bool:
+            return name in params
+
+        if is_bundle:
+            if can("bundle_path"):
+                return OPAPolicy(bundle_path=artifact)
+            if can("path"):
+                return OPAPolicy(path=artifact)
+            if can("bundle"):
+                return OPAPolicy(bundle=artifact)
+        else:
+            if can("path"):
+                return OPAPolicy(path=artifact)
+            if can("wasm"):
+                return OPAPolicy(wasm=artifact)
+
+        # 3) No compatible signature found
+        raise PolicyError(
+            "Cannot initialize OPAPolicy with the provided artifact. "
+            f"Constructor parameters: {list(params.keys())}. "
+            "Tried from_bundle/from_wasm_file and common kwargs "
+            "(bundle_path, path, bundle, wasm)."
+        )
 
     def evaluate(self, entrypoint: str, input_doc: Dict[str, Any]) -> EvalResult:
         ep = _norm_entry(entrypoint)

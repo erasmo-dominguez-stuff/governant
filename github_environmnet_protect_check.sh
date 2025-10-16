@@ -1,3 +1,4 @@
+#bin/bash
 opa fmt -w .gate/github_env_protect.rego
 opa check .gate/github_env_protect.rego
 
@@ -16,5 +17,5 @@ opa eval \
 
 
 ./scripts/validate_schema.sh
-./scripts/validate_rego.sh
-./scripts//compile_policy.sh
+./scripts/validate_github_env_protect_rego.sh
+./scripts//compile_github_env_protect_policy.sh
