@@ -1,52 +1,54 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "governant"
 version = "0.1.0"
 description = "Python wrapper for OPA policies with GitHub integration"
-authors = [
-    { name = "Erasmo Dominguez", email = "erasmo@example.com" },
-]
+authors = [{ name = "Erasmo Dominguez", email = "erasmo@example.com" }]
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Topic :: Security",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
-    "click>=8.1.0",
-    "requests>=2.31.0",
-    "jsonschema>=4.19.0",  # For schema validation
+  "requests>=2.31.0",
+  "jsonschema>=4.19.0",
 ]
 
 [project.optional-dependencies]
+# Instálalo si quieres ejecutar WASM embebido sin CLI de opa:
+wasm = [
+  "opa-wasm>=0.3.0",
+]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.12.0",
-    "black>=24.0.0",
-    "isort>=5.13.0",
-    "mypy>=1.7.0",
-    "flake8>=7.0.0",
-    "types-requests>=2.31.0",
-    "pre-commit>=3.5.0",
+  "pytest>=8.0.0",
+  "pytest-cov>=4.1.0",
+  "pytest-mock>=3.12.0",
+  "black>=24.0.0",
+  "isort>=5.13.0",
+  "mypy>=1.7.0",
+  "flake8>=7.0.0",
+  "types-requests>=2.31.0",
+  "pre-commit>=3.5.0",
 ]
 
 [project.scripts]
-governant = "opa_policy.cli:cli"
+# CLI principal
+governant = "governant.cli:main"
 
 [tool.black]
 line-length = 100
@@ -56,7 +58,7 @@ include = '\.pyi?$'
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["opa_policy"]
+known_first_party = ["governant"]
 
 [tool.mypy]
 python_version = "3.8"
@@ -75,13 +77,13 @@ disallow_incomplete_defs = true
 disallow_untyped_calls = true
 
 [tool.pytest.ini_options]
-testpaths = ["src/tests"]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --cov=opa_policy --cov-report=term-missing"
+addopts = "-v --cov=governant --cov-report=term-missing"
 
 [tool.coverage.run]
-source = ["opa_policy"]
-omit = ["src/tests/*"]
+source = ["governant"]
+omit = ["tests/*"]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/governant"
@@ -90,12 +92,13 @@ Issues = "https://github.com/yourusername/governant/issues"
 Source = "https://github.com/yourusername/governant"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/opawasm", "src/ghprotect"]
+packages = ["src/governant", "src/opawasm"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+  "src/governant/**",
   "src/opawasm/**",
-  "src/ghprotect/**",
   "pyproject.toml",
   "README.md",
+  "examples/**",
 ]
