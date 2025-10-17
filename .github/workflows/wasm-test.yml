@@ -74,12 +74,12 @@ jobs:
   # Python (opa-wasm) using the .tar.gz bundle via your CLI
       - name: Python CLI — allow (bundle)
         run: |
-          python -m opawasm.cli allow \
+          python -m governant.cli allow \
             -i test-inputs/production-valid.json \
             --output bool
 
       - name: Python CLI — violations (bundle)
         run: |
-          python -m opawasm.cli violations \
+          python -m governant.cli violations \
             -i test-inputs/production-invalid.json \
             --strict-exit
