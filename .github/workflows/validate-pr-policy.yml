@@ -130,7 +130,7 @@ jobs:
           POLICY_CONTENT="$(cat "$POLICY_PATH")"
           POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
 
-          ENV_FROM_LABEL="$(echo "$LABELS_JSON" | jq -r '.[]? | capture("(?i)^(env|environment):(?<v>.+)$")?.v // empty')"
+          ENV_FROM_LABEL="$(echo "$LABELS_JSON" | jq -r 'map(select(test("^(env|environment):"; "i"))) | .[0] // empty | sub("^(env|environment):"; ""; "i")')"
           ENV_FROM_POLICY=""
           while IFS= read -r env; do
             pats="$(echo "$POLICY_CONTENT" | jq -r --arg e "$env" '.policy.environments[$e].rules.allowed_branches // empty | @sh')"
