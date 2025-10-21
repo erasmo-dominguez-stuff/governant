@@ -14,8 +14,8 @@ on:
       - converted_to_draft
 
 permissions:
-  pull-requests: read
   contents: read
+  pull-requests: write
   checks: write
 
 jobs:
@@ -24,61 +24,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout policy + code so we can read files from the repo
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2) OPA CLI for evaluation
       - name: Set up OPA
         uses: open-policy-agent/setup-opa@v2
         with:
           version: latest
 
-      # 3) Ensure tooling (jq + gh)
       - name: Ensure jq and gh
         run: |
           set -euo pipefail
           if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y jq
+            sudo apt-get update -y && sudo apt-get install -y jq
           fi
           if ! command -v gh >/dev/null 2>&1; then
-            type -p curl >/dev/null || sudo apt-get install curl -y
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            sudo apt-get update -y && sudo apt-get install -y curl
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
             sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            sudo apt-get update -y
-            sudo apt-get install gh -y
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -y && sudo apt-get install -y gh
           fi
 
-      # 4) Build rich input.json purely from event/repo (no hardcoded env)
       - name: Build OPA input from PR event
         id: build-input
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # used by gh
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
-          EVENT_PATH="${GITHUB_EVENT_PATH}"
+          EVENT_PATH="$GITHUB_EVENT_PATH"
           REPO="${{ github.repository }}"
           PR_NUMBER="$(jq -r '.pull_request.number' "$EVENT_PATH")"
 
           echo "PR_NUMBER=$PR_NUMBER"
 
-          # Helper: robust gh api call with retries. Returns non-zero on failure.
           gh_api() {
             set +e
             local url="$1"
-            local accept="${2:-application/vnd.github+json}"
             local tries=3
             local delay=2
-            local i=1
-            local out
+            local out rc i=1
             while [ $i -le $tries ]; do
-              out=$(gh api -H "Accept: $accept" "$url" 2>/dev/null)
+              out=$(gh api -H "Accept: application/vnd.github+json" "$url" 2>/dev/null)
               rc=$?
               if [ $rc -eq 0 ] && [ -n "$out" ]; then
                 echo "$out"
@@ -86,290 +79,219 @@ jobs:
                 return 0
               fi
               sleep $((delay * i))
-              i=$((i+1))
+              i=$((i + 1))
             done
             set -e
             return 1
           }
+          get_or() { gh_api "$1" || echo "$2"; }
 
-          # Helper: call gh_api and return a safe default JSON when unavailable
-          get_json_or_default() {
-            local url="$1"; local default="$2"
-            set +e
-            out=$(gh_api "$url")
-            rc=$?
-            set -e
-            if [ $rc -ne 0 ] || [ -z "$out" ]; then
-              # Annotate the workflow logs so it's visible in the Actions UI
-              echo "::warning::gh api $url failed after retries or returned empty; using default value"
-              echo "$default"
-            else
-              echo "$out"
-            fi
-          }
-
-          # --- Extract base/head refs, draft status, labels, mergeability, files changed, requested reviewers, etc.
-          PR_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}" '{}')"
+          PR_JSON="$(get_or "/repos/${REPO}/pulls/${PR_NUMBER}" '{}')"
           BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref // ""')"
           HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref // ""')"
-          DRAFT="$(echo "$PR_JSON" | jq -r '.draft // false')"
-          MERGEABLE_STATE="$(echo "$PR_JSON" | jq -r '.mergeable_state // "unknown"')"
-          CHANGED_FILES="$(echo "$PR_JSON" | jq -r '.changed_files // 0')"
+          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha // ""')"
           TITLE="$(echo "$PR_JSON" | jq -r '.title // ""')"
           BODY="$(echo "$PR_JSON" | jq -r '.body // ""')"
-
-          # Labels as array of strings (safe even if empty)
+          DRAFT="$(echo "$PR_JSON" | jq -r '.draft // false')"
           LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[]?.name]')"
-          # Requested reviewers (logins)
-          REQ_REVIEWERS_JSON="$(echo "$PR_JSON" | jq -c '[.requested_reviewers[]?.login]')"
 
-          # --- Approvers: array of distinct logins from review events with state APPROVED
-          REVIEWS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" '[]')"
-          APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED") | .user.login) | unique')"
+          REVIEWS_JSON="$(get_or "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" '[]')"
+          APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state=="APPROVED")|.user.login)|unique')"
 
-          # --- Code owner approvers (subset)
-          CODE_OWNER_APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state == "APPROVED" and .author_association == "OWNER") | .user.login) | unique')"
+          REPO_ENVS_RAW="$(get_or "/repos/${REPO}/environments" '{"environments":[]}')"
+          REPO_ENVS="$(echo "$REPO_ENVS_RAW" | jq -c '.environments | map(.name)')"
 
-          # --- Repository defined environments (Settings → Environments)
-          REPO_ENVS="$(get_json_or_default "/repos/${REPO}/environments" '{"environments":[]}')"
-          REPO_ENVS="$(echo "$REPO_ENVS" | jq -c '.environments | map(.name)')"
+          COMMITS_JSON="$(get_or "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
+          SIGNED_OFF=$(
+            echo "$COMMITS_JSON" |
+            jq -r '[.[].commit.message | contains("Signed-off-by:")] | any' 2>/dev/null
+          )
+          if echo "$LABELS_JSON" | jq -e 'index("signed-off")' >/dev/null; then
+            SIGNED_OFF=true
+          fi
+          [ "$SIGNED_OFF" != "true" ] && SIGNED_OFF=false
 
-          # --- Policy file from repo (PR policy)
-          POLICY_PATH=".gate/github_pull_request_policy.json"
+          if [ -n "$HEAD_SHA" ]; then
+            COMBINED_STATUS_JSON="$(get_or "/repos/${REPO}/commits/${HEAD_SHA}/status" '{"state":"unknown"}')"
+            COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
+          else
+            COMBINED_STATE="unknown"
+          fi
+          TESTS_BOOL=false
+          if [ "$COMBINED_STATE" = "success" ]; then
+            TESTS_BOOL=true
+          fi
+
+          POLICY_PATH=".gate/github_env_protect_policy.json"
           if [ ! -f "$POLICY_PATH" ]; then
             echo "::error file=$POLICY_PATH::Policy file not found"
             exit 1
           fi
           POLICY_CONTENT="$(cat "$POLICY_PATH")"
-
-          # --- Environment protection policy (must contain allowed environments)
-          ENV_POLICY_PATH=".gate/github_env_protect_policy.json"
-          if [ ! -f "$ENV_POLICY_PATH" ]; then
-            echo "::error file=$ENV_POLICY_PATH::Environment protection policy not found"
-            exit 1
-          fi
-          ENV_POLICY_CONTENT="$(cat "$ENV_POLICY_PATH")"
-          ENV_POLICY_ENVS_JSON="$(echo "$ENV_POLICY_CONTENT" | jq -c '.policy.environments | keys')"
-
-          # --- Optional branch → env mapping file
-          # Example:
-          # {
-          #   "by_base_branch": {
-          #     "main": "prod",
-          #     "develop": "staging",
-          #     "feature/*": "dev"
-          #   }
-          # }
-          MAP_PATH=".gate/env_mapping.json"
-          MAP_CONTENT="{}"
-          if [ -f "$MAP_PATH" ]; then
-            MAP_CONTENT="$(cat "$MAP_PATH")"
-          fi
-
-          # --- Resolve environment (no hardcoding):
-          # 1) A label like 'environment:prod' or 'env:staging'
-          # 2) Mapping file by base branch (supports simple '*' suffix)
-          # 3) If the policy defines exactly one environment, use it
-          # 4) Otherwise, fail with a clear error (caller must specify)
-          ENV_LABEL="$(echo "$LABELS_JSON" \
-            | jq -r '.[]? | capture("^(?<k>env(ironment)?):(?<v>.+)$")? | select(.) | .v' \
-            | head -n1 || true)"
-          ENV_FROM_LABEL="${ENV_LABEL:-}"
-
-          # Mapping by base branch:
-          ENV_FROM_MAP=""
-          if [ "$MAP_CONTENT" != "{}" ]; then
-            # Exact match
-            ENV_FROM_MAP="$(echo "$MAP_CONTENT" | jq -r --arg base "$BASE_REF" '.by_base_branch[$base] // empty')"
-            # Wildcard (suffix '*'): find first pattern that matches prefix
-            if [ -z "$ENV_FROM_MAP" ]; then
-              ENV_FROM_MAP="$(echo "$MAP_CONTENT" | jq -r --arg base "$BASE_REF" '
-                (.by_base_branch // {}) as $m
-                | ($m | to_entries[]
-                    | select(.key | endswith("*"))
-                    | select($base | startswith((.key | sub("\\*$";""))))
-                    | .value) // empty
-              ' | head -n1)"
-            fi
-          fi
-
-          # Read environments from policy
           POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
-          POLICY_ENVS_COUNT="$(echo "$POLICY_ENVS_JSON" | jq -r 'length')"
 
-          # Decide final ENV. Require explicit environment selection (label or mapping)
-          # unless the policy defines exactly one environment. If unable to determine
-          # or the resolved environment is not listed in the environment-protection policy,
-          # fail the workflow.
-          ENVIRONMENT=""
-          if [ -n "${ENV_FROM_LABEL}" ]; then
+          ENV_FROM_LABEL="$(echo "$LABELS_JSON" | jq -r '.[]? | capture("(?i)^(env|environment):(?<v>.+)$")?.v // empty')"
+          ENV_FROM_POLICY=""
+          while IFS= read -r env; do
+            pats="$(echo "$POLICY_CONTENT" | jq -r --arg e "$env" '.policy.environments[$e].rules.allowed_branches // empty | @sh')"
+            if [ -z "$pats" ]; then
+              ENV_FROM_POLICY="$env"
+              break
+            fi
+            eval "arr=($pats)"
+            for p in "${arr[@]}"; do
+              p="${p%\'}"
+              p="${p#\'}"
+              if [[ "$BASE_REF" == "$p" ]]; then
+                ENV_FROM_POLICY="$env"
+                break 2
+              fi
+            done
+          done < <(echo "$POLICY_CONTENT" | jq -r '.policy.environments | keys[]')
+
+          if [ -n "$ENV_FROM_LABEL" ]; then
             ENVIRONMENT="$ENV_FROM_LABEL"
-          elif [ -n "${ENV_FROM_MAP}" ]; then
-            ENVIRONMENT="$ENV_FROM_MAP"
-          elif [ "$POLICY_ENVS_COUNT" = "1" ]; then
+          elif [ -n "$ENV_FROM_POLICY" ]; then
+            ENVIRONMENT="$ENV_FROM_POLICY"
+          elif [ "$(echo "$POLICY_ENVS_JSON" | jq 'length')" -eq 1 ]; then
             ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
           else
-            echo "::error::Unable to determine environment automatically. Workflows that affect environments must define an environment (e.g. label 'environment:prod' or provide .gate/env_mapping.json)."
-            echo "Detected policy environments: $POLICY_ENVS_JSON"
-            echo "Labels: $LABELS_JSON"
-            echo "Base branch: $BASE_REF"
+            echo "::error::Unable to determine environment. Add label 'environment:<env>' or ensure branch matches policy.allowed_branches."
             exit 1
           fi
 
-          echo "ENVIRONMENT=$ENVIRONMENT"
-
-          # Verify resolved environment is present in the environment-protection policy
-          if [ -z "$ENVIRONMENT" ]; then
-            echo "::error::Resolved environment is empty; aborting. Workflows must declare an environment."
-            exit 1
-          fi
-
-          echo "ENV_POLICY_ENVS_JSON=$ENV_POLICY_ENVS_JSON"
-          # Use jq to test membership; exit non-zero if not found
-          echo "$ENV_POLICY_ENVS_JSON" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
-            echo "::error::Environment '$ENVIRONMENT' is not listed in $ENV_POLICY_PATH; allowed environments are: $ENV_POLICY_ENVS_JSON"
+          echo "$POLICY_ENVS_JSON" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
+            echo "::error::Environment '$ENVIRONMENT' not listed in policy"
             exit 1
           }
 
-          # --- Verify the resolved environment is present in the repository's Environments (Settings → Environments)
-          # REPO_ENVS was built earlier as a JSON array like ["production","staging"]
-          echo "REPO_ENVS=$REPO_ENVS"
-          echo "$REPO_ENVS" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
-            echo "::error::Environment '$ENVIRONMENT' is not configured in this repository (Settings → Environments). Please create the environment in the repo or choose one listed in the policy. Repository environments: $REPO_ENVS"
-            exit 1
-          }
-
-          # --- DCO signed-off: true if all commits contain 'Signed-off-by:'
-          COMMITS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
-          COMMITS_TOTAL="$(echo "$COMMITS_JSON" | jq 'length')"
-          COMMITS_WITH_SIGNOFF="$(echo "$COMMITS_JSON" | jq '[ .[]?.commit.message | contains("Signed-off-by:") ] | map(select(.)) | length')"
-          if [ "$COMMITS_TOTAL" -gt 0 ] && [ "$COMMITS_WITH_SIGNOFF" -eq "$COMMITS_TOTAL" ]; then
-            SIGNED_OFF=true
-          else
-            SIGNED_OFF=false
-          fi
-
-          # --- Head commit / repo info
-          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha // ""')"
-          HEAD_REPO_FULLNAME="$(echo "$PR_JSON" | jq -r '.head.repo.full_name // ""')"
-          HEAD_REPO_FORK="$(echo "$PR_JSON" | jq -r '.head.repo.fork // false')"
-          PR_AUTHOR_ASSOC="$(echo "$PR_JSON" | jq -r '.author_association // ""')"
-
-          # --- Files changed list (array of filenames)
-          FILES_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/files" '[]')"
-          FILES_JSON="$(echo "$FILES_JSON" | jq -c '[.[]?.filename]')"
-
-          # --- Validate changed workflow files: ensure any modified/added .github/workflows/*.yml|yaml
-          # contain an 'environment:' field and that the literal environment (when detectable)
-          # is allowed by the environment-protection policy. This prevents PRs that add
-          # or change workflows which do not declare environments.
-          WF_FILES=$(echo "$FILES_JSON" | jq -r '.[] | select(test("^\\.github/workflows/.*\\.(ya?ml)$"))') || true
-          if [ -n "$WF_FILES" ]; then
-            while IFS= read -r wf; do
-              # Skip empty
-              [ -z "$wf" ] && continue
-              if [ -f "$wf" ]; then
-                # Check presence of environment: in the file
-                if ! grep -qE '^\s*environment:' "$wf"; then
-                  echo "::error file=$wf::Workflow file does not define an 'environment' field in any job. Workflows that affect environments must declare an environment." 
-                  exit 1
-                fi
-
-                # Try to extract a literal environment value (simple heuristic). If it uses expressions or vars,
-                # we'll warn and skip membership check.
-                ENV_LITERAL=$(sed -n 's/^[[:space:]]*environment:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}.*/\1/p' "$wf" | head -n1 | tr -d '\"') || true
-                if [ -n "$ENV_LITERAL" ]; then
-                  # Trim whitespace
-                  ENV_LITERAL="$(echo "$ENV_LITERAL" | sed -e 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-                  if [ -n "$ENV_LITERAL" ]; then
-                    echo "Checking workflow $wf declares environment '$ENV_LITERAL' against policy..."
-                    echo "$ENV_POLICY_ENVS_JSON" | jq -e --arg env "$ENV_LITERAL" 'index($env) != null' >/dev/null 2>&1 || {
-                      echo "::error file=$wf::Workflow environment '$ENV_LITERAL' is not listed in $ENV_POLICY_PATH; allowed environments are: $ENV_POLICY_ENVS_JSON"
-                      exit 1
-                    }
-                  fi
-                else
-                  echo "::warning::Could not extract a literal 'environment' value from $wf (may be an expression). Skipping literal membership check."
-                fi
-              fi
-            done <<< "$WF_FILES"
-          fi
-
-          # --- Per-commit verification (GPG) info
-          COMMIT_VERIFICATIONS_JSON="$(echo "$COMMITS_JSON" | jq -c 'map({sha: .sha, verified: (.commit.verification.verified // false), url: .html_url})')"
-
-          # --- Combined commit status and check runs for head sha
-          if [ -n "$HEAD_SHA" ]; then
-            COMBINED_STATUS_JSON="$(get_json_or_default "/repos/${REPO}/commits/${HEAD_SHA}/status" '{"state":"unknown"}')"
-            COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
-            CHECK_RUNS_JSON_RAW="$(get_json_or_default "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" '{"check_runs":[]}')"
-            CHECK_RUNS_JSON="$(echo "$CHECK_RUNS_JSON_RAW" | jq -c '.check_runs | map({name: .name, status: .status, conclusion: .conclusion})')"
-          else
-            # If head sha is missing we can't query statuses or checks — annotate so maintainers know
-            echo "::warning::head SHA missing from PR JSON; skipping combined status and check_runs queries"
-            COMBINED_STATUS_JSON='{"state":"unknown"}'
-            COMBINED_STATE='unknown'
-            CHECK_RUNS_JSON='[]'
-          fi
-
-          # --- Build input.json for OPA
-          cat > input.json <<EOF
-          {
-            "environment": "$ENVIRONMENT",
-            "ref": "refs/heads/${HEAD_REF}",
-            "head_sha": "$HEAD_SHA",
-            "head_repo_full_name": "$HEAD_REPO_FULLNAME",
-            "head_repo_fork": $HEAD_REPO_FORK,
-            "repo_environments": $REPO_ENVS,
-            "repo_policy": $POLICY_CONTENT,
-            "workflow_meta": {
-              "action": "${{ github.event.action }}",
-              "is_draft": $DRAFT,
-              "mergeable_state": "$MERGEABLE_STATE",
-              "requested_reviewers": $REQ_REVIEWERS_JSON,
-              "labels": $LABELS_JSON,
-              "title": $(jq -Rn --arg s "$TITLE" '$s'),
-              "body": $(jq -Rn --arg s "$BODY" '$s'),
-              "changed_files": $CHANGED_FILES,
-              "base_ref": "$BASE_REF",
-              "head_ref": "$HEAD_REF",
-              "head_sha": "$HEAD_SHA",
-              "approvers": $APPROVERS_JSON,
-              "codeowner_approvers": $CODE_OWNER_APPROVERS_JSON,
-              "signed_off": $SIGNED_OFF,
-              "commit_verifications": $COMMIT_VERIFICATIONS_JSON,
-              "combined_status": $COMBINED_STATUS_JSON,
-              "combined_state": "$COMBINED_STATE",
-              "check_runs": $CHECK_RUNS_JSON,
-              "files_changed_list": $FILES_JSON,
-              "pr_author_association": "$PR_AUTHOR_ASSOC",
-              "pull_request": $PR_NUMBER
+          if [ "$(echo "$REPO_ENVS" | jq 'length')" -gt 0 ]; then
+            echo "$REPO_ENVS" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
+              echo "::error::Environment '$ENVIRONMENT' is not configured in repository settings."
+              exit 1
             }
-          }
-          EOF
+          fi
+
+          TICKET_PATTERN="$(echo "$POLICY_CONTENT" | jq -r --arg e "$ENVIRONMENT" '.policy.environments[$e].rules.ticket_pattern // ""')"
+          if [ -n "$TICKET_PATTERN" ] && [ "$TICKET_PATTERN" != "null" ]; then
+            TICKETS="$(jq -Rnc --arg t "$TITLE" --arg b "$BODY" --arg p "$TICKET_PATTERN" '
+              def finds($s;$re): [ $s | scan($re) ];
+              ( finds($t;$p) + finds($b;$p) ) | unique'
+            )"
+          else
+            TICKETS="[]"
+          fi
+
+          WF_META="$(jq -n \
+            --argjson labels "$LABELS_JSON" \
+            --argjson approvers "$APPROVERS_JSON" \
+            --argjson tickets "$TICKETS" \
+            --arg tests_str "$TESTS_BOOL" \
+            --arg signed_str "$SIGNED_OFF" \
+            --arg draft "$DRAFT" \
+            '{
+              ticket_refs: $tickets,
+              approvers: $approvers,
+              checks: { tests: ($tests_str=="true") },
+              signed_off: ($signed_str=="true"),
+              deployments_today: 0,
+              labels: $labels,
+              is_draft: ($draft=="true")
+            }'
+          )"
+
+          jq -n \
+            --arg env "$ENVIRONMENT" \
+            --arg ref "refs/heads/$BASE_REF" \
+            --argjson repo_envs "$REPO_ENVS" \
+            --argjson repo_policy "$POLICY_CONTENT" \
+            --argjson wf_meta "$WF_META" \
+            '{
+              environment: $env,
+              ref: $ref,
+              repo_environments: $repo_envs,
+              workflow_meta: $wf_meta,
+              repo_policy: $repo_policy
+            }' > input.json
 
           echo "Built input.json:"
           jq '.' input.json
 
-      # 5) Evaluate with OPA and collect violations
       - name: Evaluate OPA policy
         id: eval
         run: |
           set -euo pipefail
-          # Evaluate 'allow' explicitly from JSON output so shell status doesn't mislead
-          ALLOW_VALUE="$(opa eval --format json --data .gate/github_pull_request.rego --input input.json 'data.github.pullrequest.allow' \
-            | jq -r '.result[0].expressions[0].value')"
-          echo "ALLOW=$ALLOW_VALUE" | tee -a "$GITHUB_OUTPUT"
 
-          echo "Violations (if any):"
-          opa eval --format pretty --data .gate/github_pull_request.rego --input input.json 'data.github.pullrequest.violations' || true
+          allow_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.allow')"
+          violations_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.violations')"
 
-      # 6) Create a GitHub Check Run with the outcome
-      - name: Report Check
+          allow="$(echo "$allow_json" | jq -r '.result[0].expressions[0].value // false')"
+          echo "allow=$allow" >> "$GITHUB_OUTPUT"
+
+          vio="$(echo "$violations_json" | jq -c '[.result[0].expressions[0].value[]?] // []')"
+          echo "violations=$vio" >> "$GITHUB_OUTPUT"
+
+          if [ "$allow" = "true" ]; then
+            env_val="$(jq -r '.environment' input.json)"
+            ref_val="$(jq -r '.ref' input.json)"
+            approvers_val="$(jq -c '.workflow_meta.approvers' input.json)"
+            md="### ✅ PR Policy: **Compliant**\n"
+            md+="- Environment: \`$env_val\`\n"
+            md+="- Ref: \`$ref_val\`\n"
+            md+="- Approvers: \`$approvers_val\`\n"
+          else
+            bullets="$(echo "$vio" | jq -r '.[] | "- " + (.msg // tostring)')"
+            [ -z "$bullets" ] && bullets="- (No detailed violations returned)"
+            md="### ❌ PR Policy: **Not compliant**\n**Violations**\n$bullets\n"
+          fi
+
+          # expose the comment body as a multiline output for subsequent steps
+          echo "comment_body<<EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$md" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update PR comment
         if: always()
         uses: actions/github-script@v7
         env:
-          POL_ALLOW: ${{ steps.eval.outputs.ALLOW }}
+          COMMENT_BODY: ${{ steps.eval.outputs.comment_body }}
+        with:
+          script: |
+            const marker = '<!-- pr-policy-bot -->';
+            const body = process.env.COMMENT_BODY || '';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const list = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+
+            const existing = list.data.find(c => (c.body || '').includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
+
+      - name: Create check run
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          POL_ALLOW: ${{ steps.eval.outputs.allow }}
         with:
           script: |
             const allowed = process.env.POL_ALLOW === 'true';
@@ -384,9 +306,7 @@ jobs:
                 title: 'PR Policy Validation',
                 summary: allowed
                   ? 'All PR policy checks passed.'
-                  : 'PR policy validation failed.',
-                text: allowed
-                  ? '✓ Policy allowed the PR based on current repository state and event data.'
-                  : '✗ Violations were detected. Open the workflow logs to see details.'
+                  : 'PR policy validation failed. See the PR comment for details.',
+                text: 'Results were also posted as a PR comment.'
               }
-            });
+            })
