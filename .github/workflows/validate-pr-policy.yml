@@ -128,7 +128,17 @@ jobs:
           POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
 
           # Resolve environment: label > policy.allowed_branches > single env in policy
-          ENV_FROM_LABEL="$(echo "$LABELS_JSON" | jq -r '.[]? | capture("(?i)^(env|environment):(?<v>.+)$")?.v // empty')"
+          ENV_FROM_LABEL="$(
+            echo "$LABELS_JSON" \
+            | jq -r '
+                [
+                  .[]?                                  # iterate labels (if any)
+                  | strings                             # ensure string
+                  | (try (capture("(?i)^(env|environment):(?<v>.+)$").v) catch empty)
+                ]
+                | first // empty                        # first match or ""
+            '
+          )"
           ENV_FROM_POLICY=""
           while IFS= read -r env; do
             pats="$(echo "$POLICY_CONTENT" | jq -r --arg e "$env" '.policy.environments[$e].rules.allowed_branches // empty | @sh')"
