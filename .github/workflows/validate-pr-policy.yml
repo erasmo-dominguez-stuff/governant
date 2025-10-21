@@ -231,6 +231,14 @@ jobs:
             exit 1
           }
 
+          # --- Verify the resolved environment is present in the repository's Environments (Settings → Environments)
+          # REPO_ENVS was built earlier as a JSON array like ["production","staging"]
+          echo "REPO_ENVS=$REPO_ENVS"
+          echo "$REPO_ENVS" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
+            echo "::error::Environment '$ENVIRONMENT' is not configured in this repository (Settings → Environments). Please create the environment in the repo or choose one listed in the policy. Repository environments: $REPO_ENVS"
+            exit 1
+          }
+
           # --- DCO signed-off: true if all commits contain 'Signed-off-by:'
           COMMITS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
           COMMITS_TOTAL="$(echo "$COMMITS_JSON" | jq 'length')"
@@ -250,6 +258,42 @@ jobs:
           # --- Files changed list (array of filenames)
           FILES_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/files" '[]')"
           FILES_JSON="$(echo "$FILES_JSON" | jq -c '[.[]?.filename]')"
+
+          # --- Validate changed workflow files: ensure any modified/added .github/workflows/*.yml|yaml
+          # contain an 'environment:' field and that the literal environment (when detectable)
+          # is allowed by the environment-protection policy. This prevents PRs that add
+          # or change workflows which do not declare environments.
+          WF_FILES=$(echo "$FILES_JSON" | jq -r '.[] | select(test("^\\.github/workflows/.*\\.(ya?ml)$"))') || true
+          if [ -n "$WF_FILES" ]; then
+            while IFS= read -r wf; do
+              # Skip empty
+              [ -z "$wf" ] && continue
+              if [ -f "$wf" ]; then
+                # Check presence of environment: in the file
+                if ! grep -qE '^\s*environment:' "$wf"; then
+                  echo "::error file=$wf::Workflow file does not define an 'environment' field in any job. Workflows that affect environments must declare an environment." 
+                  exit 1
+                fi
+
+                # Try to extract a literal environment value (simple heuristic). If it uses expressions or vars,
+                # we'll warn and skip membership check.
+                ENV_LITERAL=$(sed -n 's/^[[:space:]]*environment:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}.*/\1/p' "$wf" | head -n1 | tr -d '\"') || true
+                if [ -n "$ENV_LITERAL" ]; then
+                  # Trim whitespace
+                  ENV_LITERAL="$(echo "$ENV_LITERAL" | sed -e 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+                  if [ -n "$ENV_LITERAL" ]; then
+                    echo "Checking workflow $wf declares environment '$ENV_LITERAL' against policy..."
+                    echo "$ENV_POLICY_ENVS_JSON" | jq -e --arg env "$ENV_LITERAL" 'index($env) != null' >/dev/null 2>&1 || {
+                      echo "::error file=$wf::Workflow environment '$ENV_LITERAL' is not listed in $ENV_POLICY_PATH; allowed environments are: $ENV_POLICY_ENVS_JSON"
+                      exit 1
+                    }
+                  fi
+                else
+                  echo "::warning::Could not extract a literal 'environment' value from $wf (may be an expression). Skipping literal membership check."
+                fi
+              fi
+            done <<< "$WF_FILES"
+          fi
 
           # --- Per-commit verification (GPG) info
           COMMIT_VERIFICATIONS_JSON="$(echo "$COMMITS_JSON" | jq -c 'map({sha: .sha, verified: (.commit.verification.verified // false), url: .html_url})')"
