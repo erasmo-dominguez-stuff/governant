@@ -4,14 +4,16 @@ on:
   pull_request:
     branches: [ main ]
     types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-      - labeled
-      - unlabeled
-      - edited
-      - converted_to_draft
+      [
+        opened,
+        synchronize,
+        reopened,
+        ready_for_review,
+        labeled,
+        unlabeled,
+        edited,
+        converted_to_draft
+      ]
 
 permissions:
   contents: read
@@ -53,7 +55,7 @@ jobs:
       - name: Build OPA input from PR event
         id: build-input
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}       # used by gh
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -64,6 +66,7 @@ jobs:
 
           echo "PR_NUMBER=$PR_NUMBER"
 
+          # --- Small helpers with retry ---
           gh_api() {
             set +e
             local url="$1"
@@ -86,8 +89,9 @@ jobs:
           }
           get_or() { gh_api "$1" || echo "$2"; }
 
+          # --- PR data ---
           PR_JSON="$(get_or "/repos/${REPO}/pulls/${PR_NUMBER}" '{}')"
-          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref // ""')"
+          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref // ""')"     # target branch (e.g., main)
           HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref // ""')"
           HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha // ""')"
           TITLE="$(echo "$PR_JSON" | jq -r '.title // ""')"
@@ -95,12 +99,15 @@ jobs:
           DRAFT="$(echo "$PR_JSON" | jq -r '.draft // false')"
           LABELS_JSON="$(echo "$PR_JSON" | jq -c '[.labels[]?.name]')"
 
+          # Approved reviewers -> approvers
           REVIEWS_JSON="$(get_or "/repos/${REPO}/pulls/${PR_NUMBER}/reviews" '[]')"
           APPROVERS_JSON="$(echo "$REVIEWS_JSON" | jq -c 'map(select(.state=="APPROVED")|.user.login)|unique')"
 
+          # Repo environments (sanity)
           REPO_ENVS_RAW="$(get_or "/repos/${REPO}/environments" '{"environments":[]}')"
           REPO_ENVS="$(echo "$REPO_ENVS_RAW" | jq -c '.environments | map(.name)')"
 
+          # Commit signed-off detection (simple heuristic + label override)
           COMMITS_JSON="$(get_or "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
           SIGNED_OFF=$(
             echo "$COMMITS_JSON" |
@@ -111,17 +118,7 @@ jobs:
           fi
           [ "$SIGNED_OFF" != "true" ] && SIGNED_OFF=false
 
-          if [ -n "$HEAD_SHA" ]; then
-            COMBINED_STATUS_JSON="$(get_or "/repos/${REPO}/commits/${HEAD_SHA}/status" '{"state":"unknown"}')"
-            COMBINED_STATE="$(echo "$COMBINED_STATUS_JSON" | jq -r '.state // "unknown"')"
-          else
-            COMBINED_STATE="unknown"
-          fi
-          TESTS_BOOL=false
-          if [ "$COMBINED_STATE" = "success" ]; then
-            TESTS_BOOL=true
-          fi
-
+          # Load repo policy JSON
           POLICY_PATH=".gate/github_env_protect_policy.json"
           if [ ! -f "$POLICY_PATH" ]; then
             echo "::error file=$POLICY_PATH::Policy file not found"
@@ -130,7 +127,8 @@ jobs:
           POLICY_CONTENT="$(cat "$POLICY_PATH")"
           POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
 
-          ENV_FROM_LABEL="$(echo "$LABELS_JSON" | jq -r 'map(select(test("^(env|environment):"; "i"))) | .[0] // empty | sub("^(env|environment):"; ""; "i")')"
+          # Resolve environment: label > policy.allowed_branches > single env in policy
+          ENV_FROM_LABEL="$(echo "$LABELS_JSON" | jq -r '.[]? | capture("(?i)^(env|environment):(?<v>.+)$")?.v // empty')"
           ENV_FROM_POLICY=""
           while IFS= read -r env; do
             pats="$(echo "$POLICY_CONTENT" | jq -r --arg e "$env" '.policy.environments[$e].rules.allowed_branches // empty | @sh')"
@@ -160,6 +158,7 @@ jobs:
             exit 1
           fi
 
+          # Validate env presence
           echo "$POLICY_ENVS_JSON" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
             echo "::error::Environment '$ENVIRONMENT' not listed in policy"
             exit 1
@@ -172,27 +171,16 @@ jobs:
             }
           fi
 
-          TICKET_PATTERN="$(echo "$POLICY_CONTENT" | jq -r --arg e "$ENVIRONMENT" '.policy.environments[$e].rules.ticket_pattern // ""')"
-          if [ -n "$TICKET_PATTERN" ] && [ "$TICKET_PATTERN" != "null" ]; then
-            TICKETS="$(jq -Rnc --arg t "$TITLE" --arg b "$BODY" --arg p "$TICKET_PATTERN" '
-              def finds($s;$re): [ $s | scan($re) ];
-              ( finds($t;$p) + finds($b;$p) ) | unique'
-            )"
-          else
-            TICKETS="[]"
-          fi
-
+          # Build workflow_meta for Rego (approvers/signed_off come from above)
           WF_META="$(jq -n \
             --argjson labels "$LABELS_JSON" \
             --argjson approvers "$APPROVERS_JSON" \
-            --argjson tickets "$TICKETS" \
-            --arg tests_str "$TESTS_BOOL" \
             --arg signed_str "$SIGNED_OFF" \
             --arg draft "$DRAFT" \
             '{
-              ticket_refs: $tickets,
+              ticket_refs: [],                  # not required by pullrequest policy
               approvers: $approvers,
-              checks: { tests: ($tests_str=="true") },
+              checks: { tests: null },          # not evaluated by this policy
               signed_off: ($signed_str=="true"),
               deployments_today: 0,
               labels: $labels,
@@ -200,6 +188,7 @@ jobs:
             }'
           )"
 
+          # Build the Rego input expected by package github.pullrequest
           jq -n \
             --arg env "$ENVIRONMENT" \
             --arg ref "refs/heads/$BASE_REF" \
@@ -222,33 +211,51 @@ jobs:
         run: |
           set -euo pipefail
 
-          allow_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.allow')"
-          violations_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.violations')"
-
-          allow="$(echo "$allow_json" | jq -r '.result[0].expressions[0].value // false')"
+          # Evaluate with fallbacks to avoid empty outputs
+          if ! allow_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.allow')"; then
+            echo "::warning::opa eval for allow failed; defaulting to false"
+            allow="false"
+          else
+            allow="$(echo "$allow_json" | jq -r '.result[0].expressions[0].value // false' 2>/dev/null || echo false)"
+          fi
           echo "allow=$allow" >> "$GITHUB_OUTPUT"
 
-          vio="$(echo "$violations_json" | jq -c '[.result[0].expressions[0].value[]?] // []')"
+          if ! violations_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.violations')"; then
+            echo "::warning::opa eval for violations failed; defaulting to []"
+            vio="[]"
+          else
+            vio="$(echo "$violations_json" | jq -c '[.result[0].expressions[0].value[]?] // []' 2>/dev/null || echo '[]')"
+          fi
           echo "violations=$vio" >> "$GITHUB_OUTPUT"
 
+          # Render markdown; never empty
+          env_val="$(jq -r '.environment // ""' input.json)"
+          ref_val="$(jq -r '.ref // ""' input.json)"
+          approvers_val="$(jq -c '.workflow_meta.approvers // []' input.json)"
+
           if [ "$allow" = "true" ]; then
-            env_val="$(jq -r '.environment' input.json)"
-            ref_val="$(jq -r '.ref' input.json)"
-            approvers_val="$(jq -c '.workflow_meta.approvers' input.json)"
-            md="### ✅ PR Policy: **Compliant**\n"
-            md+="- Environment: \`$env_val\`\n"
-            md+="- Ref: \`$ref_val\`\n"
-            md+="- Approvers: \`$approvers_val\`\n"
+            md=$'<!-- pr-policy-bot -->\n'
+            md+=$'### ✅ PR Policy: **Compliant**\n'
+            md+=$'- Environment: `'"$env_val"'`\n'
+            md+=$'- Ref: `'"$ref_val"'`\n'
+            md+=$'- Approvers: `'"$approvers_val"'`'
           else
-            bullets="$(echo "$vio" | jq -r '.[] | "- " + (.msg // tostring)')"
-            [ -z "$bullets" ] && bullets="- (No detailed violations returned)"
-            md="### ❌ PR Policy: **Not compliant**\n**Violations**\n$bullets\n"
+            bullets="$(echo "$vio" | jq -r '.[] | "- " + (.msg // tostring)' 2>/dev/null || true)"
+            if [ -z "${bullets:-}" ]; then
+              bullets="- (No detailed violations returned)"
+            fi
+            md=$'<!-- pr-policy-bot -->\n'
+            md+=$'### ❌ PR Policy: **Not compliant**\n'
+            md+=$'**Violations**\n'
+            md+="$bullets"
           fi
 
-          # expose the comment body as a multiline output for subsequent steps
-          echo "comment_body<<EOF" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$md" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          # Emit multiline output for next step
+          {
+            echo 'comment_body<<EOF'
+            printf '%s\n' "$md"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create or update PR comment
         if: always()
@@ -258,18 +265,18 @@ jobs:
         with:
           script: |
             const marker = '<!-- pr-policy-bot -->';
-            const body = process.env.COMMENT_BODY || '';
+            const body = process.env.COMMENT_BODY || '### ⚠️ PR Policy: No result available (evaluation step failed)';
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;
 
-            const list = await github.rest.issues.listComments({
+            const { data: comments } = await github.rest.issues.listComments({
               owner,
               repo,
               issue_number,
               per_page: 100
             });
 
-            const existing = list.data.find(c => (c.body || '').includes(marker));
+            const existing = comments.find(c => (c.body || '').includes(marker));
 
             if (existing) {
               await github.rest.issues.updateComment({
