@@ -134,13 +134,22 @@ jobs:
           REPO_ENVS="$(get_json_or_default "/repos/${REPO}/environments" '{"environments":[]}')"
           REPO_ENVS="$(echo "$REPO_ENVS" | jq -c '.environments | map(.name)')"
 
-          # --- Policy file from repo
+          # --- Policy file from repo (PR policy)
           POLICY_PATH=".gate/github_pull_request_policy.json"
           if [ ! -f "$POLICY_PATH" ]; then
             echo "::error file=$POLICY_PATH::Policy file not found"
             exit 1
           fi
           POLICY_CONTENT="$(cat "$POLICY_PATH")"
+
+          # --- Environment protection policy (must contain allowed environments)
+          ENV_POLICY_PATH=".gate/github_env_protect_policy.json"
+          if [ ! -f "$ENV_POLICY_PATH" ]; then
+            echo "::error file=$ENV_POLICY_PATH::Environment protection policy not found"
+            exit 1
+          fi
+          ENV_POLICY_CONTENT="$(cat "$ENV_POLICY_PATH")"
+          ENV_POLICY_ENVS_JSON="$(echo "$ENV_POLICY_CONTENT" | jq -c '.policy.environments | keys')"
 
           # --- Optional branch → env mapping file
           # Example:
@@ -188,7 +197,10 @@ jobs:
           POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
           POLICY_ENVS_COUNT="$(echo "$POLICY_ENVS_JSON" | jq -r 'length')"
 
-          # Decide final ENV
+          # Decide final ENV. Require explicit environment selection (label or mapping)
+          # unless the policy defines exactly one environment. If unable to determine
+          # or the resolved environment is not listed in the environment-protection policy,
+          # fail the workflow.
           ENVIRONMENT=""
           if [ -n "${ENV_FROM_LABEL}" ]; then
             ENVIRONMENT="$ENV_FROM_LABEL"
@@ -197,16 +209,27 @@ jobs:
           elif [ "$POLICY_ENVS_COUNT" = "1" ]; then
             ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
           else
-            # Don't fail the workflow for ambiguous environment selection. Choose a safe default
-            # (first environment listed in the policy) and annotate the run so maintainers can fix it.
-            echo "::warning::Unable to determine environment automatically; defaulting to the first policy environment. Add a label like 'environment:prod' or provide .gate/env_mapping.json to control this behavior."
+            echo "::error::Unable to determine environment automatically. Workflows that affect environments must define an environment (e.g. label 'environment:prod' or provide .gate/env_mapping.json)."
             echo "Detected policy environments: $POLICY_ENVS_JSON"
             echo "Labels: $LABELS_JSON"
             echo "Base branch: $BASE_REF"
-            ENVIRONMENT="$(echo "$POLICY_ENVS_JSON" | jq -r '.[0]')"
+            exit 1
           fi
 
           echo "ENVIRONMENT=$ENVIRONMENT"
+
+          # Verify resolved environment is present in the environment-protection policy
+          if [ -z "$ENVIRONMENT" ]; then
+            echo "::error::Resolved environment is empty; aborting. Workflows must declare an environment."
+            exit 1
+          fi
+
+          echo "ENV_POLICY_ENVS_JSON=$ENV_POLICY_ENVS_JSON"
+          # Use jq to test membership; exit non-zero if not found
+          echo "$ENV_POLICY_ENVS_JSON" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
+            echo "::error::Environment '$ENVIRONMENT' is not listed in $ENV_POLICY_PATH; allowed environments are: $ENV_POLICY_ENVS_JSON"
+            exit 1
+          }
 
           # --- DCO signed-off: true if all commits contain 'Signed-off-by:'
           COMMITS_JSON="$(get_json_or_default "/repos/${REPO}/pulls/${PR_NUMBER}/commits" '[]')"
