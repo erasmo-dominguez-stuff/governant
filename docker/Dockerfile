@@ -82,4 +82,6 @@ USER appuser
 
 # Default workdir is /app. ENTRYPOINT uses the REAL package/CLI.
 ENTRYPOINT ["python", "-m", "governant.cli"]
-# No CMD by default — pass your args at `docker run` time.
+# Default command: show CLI version when no arguments are provided.
+# You can still pass commands like `allow -i /input.json` when running the container.
+CMD ["version"]

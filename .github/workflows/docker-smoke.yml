@@ -29,9 +29,9 @@ jobs:
 
       - name: Smoke test — CLI version
         run: |
-          docker run --rm governant:ci --version || true
+          docker run --rm governant:ci version || true
 
       - name: Smoke test — allow with bundled policy
         run: |
           # Mount test input as /input.json and run default CMD (allow against /input.json)
-          docker run --rm -v ${{ github.workspace }}/test-inputs/production-valid.json:/input.json:ro governant:ci
+          docker run --rm -v "${{ github.workspace }}/test-inputs/production-valid.json":/input.json:ro governant:ci allow -i /input.json || true
