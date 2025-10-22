@@ -36,6 +36,20 @@ It provides a robust way to enforce deployment rules and compliance checks durin
 It builds on the *Governant philosophy*:
 > *Define your governance declaratively, validate it automatically, and enforce it confidently.*
 
+## ❓ Why this project exists
+
+Organizations that deploy software across environments (GitHub, Kubernetes, ArgoCD, etc.) need reliable, testable guardrails: who may deploy to production, which branches are allowed, how many approvals are required, and whether a valid ticket is referenced. Those checks are often implemented as ad-hoc scripts or scattered CI steps that are hard to maintain, reuse, and test.
+
+Governant addresses this gap by:
+
+- Centralizing governance rules as declarative configuration plus Rego policies under `.gate/`.
+- Providing a small, testable Python runtime and CLI that can evaluate compiled policy bundles (WASM / tar) programmatically or from CI.
+- Making policies easy to validate (JSON Schema), test (Rego unit tests), and run in GitHub Actions or locally.
+
+Quick start pointers:
+
+- Try the local demo: `examples/run_policy_wasm.py`.
+- Rebuild the runtime bundle if you change policies: `./scripts/compile_github_env_protect_policy.sh`.
 ---
 
 ## 🚦 Main Use Cases
