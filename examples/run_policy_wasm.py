@@ -4,7 +4,7 @@
 Usage:
   python3 examples/run_policy_hardcoded.py
 
-This script prefers the `.gate/` policy directory when present (useful for
+This script prefers the `.governant/` policy directory when present (useful for
 local development). It demonstrates evaluating `allow` and `violations` for
 the `github.deploy` package. Adjust `default_pkg` or `input_doc` to test other
 entrypoints or policies.
@@ -19,19 +19,19 @@ from governant.core import PolicyEngine, PolicyError
 
 
 def locate_artifact(root: str) -> str:
-    gate = os.path.join(root, ".gate")
+    gate = os.path.join(root, ".governant")
     bundle = os.path.join(root, ".compile", "github_env_protect.tar.gz")
     if os.path.isdir(gate):
         return gate
     if os.path.isfile(bundle):
         return bundle
-    raise FileNotFoundError("No policy artifact found (.gate/ or .compile/*.tar.gz)")
+    raise FileNotFoundError("No policy artifact found (.governant/ or .compile/*.tar.gz)")
 
 
 def load_policy_json(root: str) -> dict:
     # Some policies expect the input to include the repo policy JSON under
     # `input.repo_policy` — load the file if present to make the demo realistic.
-    path = os.path.join(root, ".gate", "github_env_protect_policy.json")
+    path = os.path.join(root, ".governant", "policies", "github_env_protect_policy.json")
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8") as fh:
             return json.load(fh)

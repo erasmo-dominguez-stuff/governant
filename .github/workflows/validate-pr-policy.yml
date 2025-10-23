@@ -119,7 +119,7 @@ jobs:
           [ "$SIGNED_OFF" != "true" ] && SIGNED_OFF=false
 
           # Load repo policy JSON
-          POLICY_PATH=".gate/github_env_protect_policy.json"
+          POLICY_PATH=".governant/policies/github_env_protect_policy.json"
           if [ ! -f "$POLICY_PATH" ]; then
             echo "::error file=$POLICY_PATH::Policy file not found"
             exit 1
@@ -222,7 +222,7 @@ jobs:
           set -euo pipefail
 
           # Evaluate with fallbacks to avoid empty outputs
-          if ! allow_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.allow')"; then
+          if ! allow_json="$(opa eval --format json --data .governant/code --input input.json 'data.github.pullrequest.allow')"; then
             echo "::warning::opa eval for allow failed; defaulting to false"
             allow="false"
           else
@@ -230,7 +230,7 @@ jobs:
           fi
           echo "allow=$allow" >> "$GITHUB_OUTPUT"
 
-          if ! violations_json="$(opa eval --format json --data .gate --input input.json 'data.github.pullrequest.violations')"; then
+          if ! violations_json="$(opa eval --format json --data .governant/code --input input.json 'data.github.pullrequest.violations')"; then
             echo "::warning::opa eval for violations failed; defaulting to []"
             vio="[]"
           else

@@ -26,7 +26,7 @@ COPY --from=opa /opa /usr/local/bin/opa
 RUN chmod +x /usr/local/bin/opa || true
 
 # ---- OPTION A: compile inside the image (requires your sources & script) ----
-# COPY .gate/ ./.gate/
+# COPY .governant/ ./.governant/
 # COPY scripts/ ./scripts/
 # RUN chmod +x ./scripts/compile_github_env_protect_policy.sh \
 #  && ./scripts/compile_github_env_protect_policy.sh

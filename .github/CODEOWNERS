@@ -1,0 +1,5 @@
+# CODEOWNERS
+# All files under .governant/ are owned by the GitHub team 'governant-admin'.
+# Note: To require their review for merges, enable branch protection and
+# turn on "Require review from Code Owners" in repository settings.
+/.governant/** @erasmo-dominguez-stuff/governant-admin

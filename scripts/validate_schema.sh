@@ -15,7 +15,7 @@ fi
 
 # Set default file paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GATE_DIR="$(dirname "$SCRIPT_DIR")/.gate"
+GATE_DIR="$(dirname "$SCRIPT_DIR")/.governant"
 POLICY_FILE="$GATE_DIR/github_env_protect_policy.json"
 SCHEMA_FILE="$GATE_DIR/github_env_protect_schema.json"
 

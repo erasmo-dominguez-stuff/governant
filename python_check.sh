@@ -20,12 +20,12 @@ VALID_INPUT="${PROJECT_ROOT}/test-inputs/production-valid.json"
 INVALID_INPUT="${PROJECT_ROOT}/test-inputs/production-invalid.json"
 WASM_BUNDLE="${PROJECT_ROOT}/.compile/github_env_protect.tar.gz"
 
-# Prefer using the Rego source directory (.gate) for local checks because some
-# OPA builds may not support executing embedded WASM modules. If .gate exists,
+# Prefer using the Rego source directory (.governant) for local checks because some
+# OPA builds may not support executing embedded WASM modules. If .governant exists,
 # use it as the artifact (opa accepts --bundle <dir>), otherwise fall back to
 # the compiled bundle in .compile.
-if [ -d "${PROJECT_ROOT}/.gate" ]; then
-  DEFAULT_ARTIFACT="${PROJECT_ROOT}/.gate"
+if [ -d "${PROJECT_ROOT}/.governant" ]; then
+  DEFAULT_ARTIFACT="${PROJECT_ROOT}/.governant"
 else
   DEFAULT_ARTIFACT="$WASM_BUNDLE"
 fi
@@ -53,7 +53,7 @@ if [[ -d "$POLICY_ARTIFACT" ]] || [[ -f "$POLICY_ARTIFACT" ]]; then
 else
   echo "❌ Error: Policy artifact not found at $POLICY_ARTIFACT"
   echo "Looking for bundle candidates in ${PROJECT_ROOT}:"
-  find "${PROJECT_ROOT}" \( -name "*.tar.gz" -o -name "*.wasm" -o -type d -name ".gate" \)
+  find "${PROJECT_ROOT}" \( -name "*.tar.gz" -o -name "*.wasm" -o -type d -name ".governant" \)
   exit 1
 fi
 

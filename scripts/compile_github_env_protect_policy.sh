@@ -2,7 +2,7 @@
 set -euxo pipefail
 
 # --- Constants ---
-POLICY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.gate" && pwd)"
+POLICY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.governant/code" && pwd)"
 POLICY_FILE="$POLICY_DIR/github_env_protect.rego"
 OUTPUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.compile"
 BUNDLE_FILE="$OUTPUT_DIR/github_env_protect.tar.gz"
