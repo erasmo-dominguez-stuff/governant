@@ -38,17 +38,17 @@ jobs:
       - name: OPA CLI — allow (rego) Just a smoke test to make sure 
         run: |
           opa eval \
-            -d .gate/github_env_protect.rego \
+            -d .governant/code/github_env_protect.rego \
             --input test-inputs/production-valid.json \
             'data.github.deploy.allow'
 
       - name: OPA FMT 
         run: |
-          opa fmt -w .gate/github_env_protect.rego
+          opa fmt -w .governant/code/github_env_protect.rego
 
       - name: OPA CHECK
         run: |
-          opa check .gate/github_env_protect.rego
+          opa check .governant/code/github_env_protect.rego
           
       - name: Compile policy to .compile/
         run: ./scripts/compile_github_env_protect_policy.sh

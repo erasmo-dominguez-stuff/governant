@@ -26,7 +26,7 @@ COPY --from=opa /opa /usr/local/bin/opa
 RUN chmod +x /usr/local/bin/opa || true
 
 # ---- OPTION A: compile inside the image (requires your sources & script) ----
-# COPY .gate/ ./.gate/
+# COPY .governant/ ./.governant/
 # COPY scripts/ ./scripts/
 # RUN chmod +x ./scripts/compile_github_env_protect_policy.sh \
 #  && ./scripts/compile_github_env_protect_policy.sh
@@ -82,4 +82,6 @@ USER appuser
 
 # Default workdir is /app. ENTRYPOINT uses the REAL package/CLI.
 ENTRYPOINT ["python", "-m", "governant.cli"]
-# No CMD by default — pass your args at `docker run` time.
+# Default command: show CLI version when no arguments are provided.
+# You can still pass commands like `allow -i /input.json` when running the container.
+CMD ["version"]

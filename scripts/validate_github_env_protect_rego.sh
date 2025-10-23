@@ -15,9 +15,9 @@ fi
 
 # Set default file paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GATE_DIR="$(dirname "$SCRIPT_DIR")/.gate"
-POLICY_FILE="$GATE_DIR/github_env_protect_policy.json"
-REGO_FILE="$GATE_DIR/github_env_protect.rego"
+GATE_DIR="$(dirname "$SCRIPT_DIR")/.governant"
+POLICY_FILE="$GATE_DIR/policies/github_env_protect_policy.json"
+REGO_FILE="$GATE_DIR/code/github_env_protect.rego"
 
 # Check if files exist
 if [ ! -f "$POLICY_FILE" ]; then

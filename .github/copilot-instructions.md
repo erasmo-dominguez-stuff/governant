@@ -4,7 +4,7 @@ This repository implements a Python wrapper around OPA (Open Policy Agent) polic
 Keep the guidance below short and concrete so you can be productive immediately.
 
 ### Big picture
-- Policy layers live under the `.gate/` directory: JSON configuration (`policy.json`), JSON Schema (`schema.json`) and Rego files (`*.rego`).
+-- Policy layers live under the `.governant/` directory: `policies/`, `schemas/` and `code/` (Rego files).
 - The Python runtime loads an OPA WASM bundle (default: `.compile/github_env_protect.tar.gz`) and exposes helpers in `src/opawasm/` (`PolicyEngine`, CLI in `src/opawasm/cli.py`).
 - Typical flows:
   - CI/Workflows build an `input` JSON (see `test-inputs/`) and call the CLI or library to evaluate `data.github.deploy.allow` or `data.github.deploy.violations`.
@@ -14,7 +14,7 @@ Keep the guidance below short and concrete so you can be productive immediately.
 - `src/opawasm/main.py` — core `PolicyEngine` wrapper around `opa-wasm` Python API. Important: it supports multiple runtime signatures (bundles vs wasm; `from_bundle`, `path`, `wasm` kwargs).
 - `src/opawasm/cli.py` — CLI (`policy`) with subcommands: `allow`, `violations`, `eval`, `version`. Use `--artifact` to change the bundle, `--quiet` and `--strict-exit` for CI behavior.
 - `.compile/github_env_protect.tar.gz` — default bundle path referenced by `DEFAULT_ARTIFACT` in `main.py`.
-- `.gate/` — holds `*.rego`, `*_policy.json` and `*_schema.json` that define intent, schema and logic.
+.governant/ — holds `policies/`, `code/` and `schemas/` that define intent, schema and logic.
 - `scripts/validate_schema.sh` and `scripts/validate_github_env_protect_rego.sh` — helper scripts for local validation (jq / opa checks).
 - `test-inputs/` — sample inputs used by tests and manual `opa eval` runs (e.g. `production-valid.json`).
 
@@ -28,8 +28,8 @@ Keep the guidance below short and concrete so you can be productive immediately.
   - `poetry run python -m opawasm.cli allow -i test-inputs/production-valid.json` (or `policy allow -i ...` if installed)
   - To exit non-zero on denial (CI): add `--strict-exit`.
 - Check Rego syntax / evaluate policy with OPA:
-  - `opa check .gate/*.rego`
-  - `opa eval --data .gate/github-release.rego --input test-inputs/production-valid.json "data.policy.github.release.allow"`
+  - `opa check .governant/code/*.rego`
+  - `opa eval --data .governant/code/github_env_protect.rego --input test-inputs/production-valid.json "data.github.deploy.allow"`
 - Validate policy JSON against schema (local script):
   - `./scripts/validate_schema.sh`
 
@@ -45,7 +45,7 @@ Keep the guidance below short and concrete so you can be productive immediately.
 - CI expects the policy CLI to be callable in scripts and workflows. Keep `--artifact`, `--quiet`, and `--strict-exit` flags stable.
 
 ### When you edit policies or the engine
-- If you change `.gate/*.rego` or `policy.json`:
+- If you change `.governant/code/*.rego` or `policies/*`:
   - Update or re-generate the bundle using `scripts/compile_github_env_protect_policy.sh`.
   - Validate Rego with `opa check` and JSON with `./scripts/validate_schema.sh`.
   - Run `poetry run pytest` to ensure no regressions in Python helpers.

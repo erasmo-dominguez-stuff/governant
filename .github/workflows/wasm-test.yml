@@ -59,9 +59,13 @@ jobs:
       - name: Install project + opa-wasm
         run: |
           if [ -f pyproject.toml ]; then
-            uv pip install -e .
+            python -m pip install -e .
           fi
-          uv pip install "opa-wasm[cranelift]"
+          python -m pip install "opa-wasm[cranelift]"
+
+      - name: Check package installed
+        run: |
+          python -m pip show governant || (python -m pip list && false)
 
       - name: Set up OPA (official)
         uses: open-policy-agent/setup-opa@v2
@@ -74,12 +78,11 @@ jobs:
   # Python (opa-wasm) using the .tar.gz bundle via your CLI
       - name: Python CLI — allow (bundle)
         run: |
-          python -m opawasm.cli allow \
-            -i test-inputs/production-valid.json \
-            --output bool
+          python -m governant.cli --artifact .compile/github_env_protect.tar.gz --package github.deploy allow \
+            -i test-inputs/production-valid.json
 
       - name: Python CLI — violations (bundle)
         run: |
-          python -m opawasm.cli violations \
+          python -m governant.cli --artifact .compile/github_env_protect.tar.gz --package github.deploy violations \
             -i test-inputs/production-invalid.json \
             --strict-exit

@@ -1,6 +1,6 @@
 package github.pullrequest_test
 import rego.v1
-import data.github.pullrequest
+import data.github.pullrequest as github_pullrequest
 
 # --- Define a base reusable policy for tests
 base_policy := {
@@ -22,7 +22,7 @@ base_policy := {
 
 # --- Example test: should ALLOW when all conditions pass
 test_allow_main_branch if {
-  input := {
+  test_input := {
     "environment": "pr_validation",
     "ref": "refs/heads/main",
     "repo_environments": ["dev", "staging"],
@@ -32,12 +32,12 @@ test_allow_main_branch if {
       "signed_off": false
     }
   }
-  github_pullrequest.allow with input as input
+  github_pullrequest.allow with input as test_input
 }
 
 # --- Example test: should DENY when branch not allowed
 test_deny_branch_not_allowed if {
-  input := {
+  test_input := {
     "environment": "pr_validation",
     "ref": "refs/heads/feature/abc",
     "repo_environments": ["dev", "staging"],
@@ -47,12 +47,12 @@ test_deny_branch_not_allowed if {
       "signed_off": false
     }
   }
-  not github_pullrequest.allow with input as input
+  not github_pullrequest.allow with input as test_input
 }
 
 # --- Example test: should DENY when no approvers
 test_deny_missing_approvers if {
-  input := {
+  test_input := {
     "environment": "pr_validation",
     "ref": "refs/heads/main",
     "repo_environments": ["dev", "staging"],
@@ -62,5 +62,5 @@ test_deny_missing_approvers if {
       "signed_off": false
     }
   }
-  not github_pullrequest.allow with input as input
+  not github_pullrequest.allow with input as test_input
 }
