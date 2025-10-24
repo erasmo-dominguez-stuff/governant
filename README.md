@@ -188,21 +188,63 @@ opa check .governant/code/*.rego
 poetry run pytest -v
 ```
 
-## Useful scripts
+## Scripts (what they do)
 
-The `scripts/` directory contains small helpers used during development and CI. Each script is documented with usage at the top.
+All helper scripts live under `scripts/`. Many were added during refactors; there are a few duplicate/legacy variants present. Below is a canonical list (what to use) and notes about duplicates.
 
-- `scripts/docker-build.sh` — Build the repository Docker image.
-  - Usage: `./scripts/docker-build.sh [image-name]`
+Canonical scripts (use these by default):
 
-- `scripts/github-environment-protect-check.sh` — Evaluate the environment protection policy against an input JSON.
+- `scripts/compile_github_env_protect_policy.sh` — Compile Rego code into an OPA bundle (WASM/tar.gz) used by the Python runtime and CI.
+  - Usage: `./scripts/compile_github_env_protect_policy.sh`
+
+- `scripts/github-environment-protect-check.sh` — Evaluate the environment protection policy (`.governant/code/github_env_protect.rego`) against an input JSON. Returns violations/allow state.
   - Usage: `./scripts/github-environment-protect-check.sh test-inputs/production-valid.json`
 
-- `scripts/github-pull-request-check.sh` — Evaluate the pull request policy against an input JSON.
+- `scripts/github-pull-request-check.sh` — Evaluate the pull request policy (`.governant/code/github_pull_request.rego`) against an input JSON. Returns violations/allow state and is the script used by local/CI testing for PR checks.
   - Usage: `./scripts/github-pull-request-check.sh test-inputs/pr_valid.json`
 
-- `scripts/run-deploy-policy-check.sh` — Run a local deployment policy check (convenience wrapper).
+- `scripts/run-deploy-policy-check.sh` — Convenience wrapper that evaluates deployment-policy-related inputs (calls environment-protect check with nicer output).
   - Usage: `./scripts/run-deploy-policy-check.sh test-inputs/production-valid.json`
+
+- `scripts/python_check.sh` — Sanity-check for the Python runtime/CLI integration. Attempts to import the runtime and run a tiny allow/violations evaluation.
+
+- `scripts/validate_schema.sh` — Validate `.governant/policies/*.json` against the JSON schemas in `.governant/schemas/`.
+
+- `scripts/validate_github_env_protect_rego.sh` — Run `opa fmt`/`opa check` on `.governant/code/*.rego` and run any Rego unit tests.
+
+- `scripts/docker-build.sh` — Build a local Docker image for the project. Useful for CI smoke tests or running the CLI in a container.
+
+- `scripts/eval_pr_policy.sh` — Small helper to run `opa eval` against the PR policy with a given input file (convenience for local testing).
+
+
+Duplicate / legacy scripts found (recommendation: remove or archive):
+
+- `scripts/github_environmnet_protect_check.sh` — Duplicate / typo'd version of `github-environment-protect-check.sh` (note the typo `environmnet`). Recommend removing or moving to `scripts/legacy-snapshots/`.
+
+- `scripts/github_pull_request_check.sh` — Underscored duplicate of `github-pull-request-check.sh`. Recommend keeping the hyphenated name and removing this duplicate.
+
+Why keep canonical names?
+- Hyphenated script names match the rest of the repo and CI usage (`github-pull-request-check.sh`). Keeping one canonical name avoids confusion in workflows and documentation.
+
+Recommended cleanup steps (one-time maintainer actions):
+
+1. Inspect duplicates and either delete or move them to `scripts/legacy-snapshots/`:
+
+```bash
+# example: move the typo'd script to an archive folder
+mkdir -p scripts/legacy-snapshots
+git mv scripts/github_environmnet_protect_check.sh scripts/legacy-snapshots/
+git mv scripts/github_pull_request_check.sh scripts/legacy-snapshots/
+```
+
+2. Ensure canonical scripts are executable (CI runners also require this):
+
+```bash
+chmod +x scripts/*.sh
+git add -u scripts && git commit -m "scripts: mark canonical scripts executable and archive legacy duplicates"
+```
+
+3. If you prefer me to do the archival and permission changes, I can apply those edits in a follow-up commit.
 
 If you add or rename scripts, keep this section and the examples in sync.
 
