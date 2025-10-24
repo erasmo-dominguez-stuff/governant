@@ -2,7 +2,7 @@
   "policy": {
     "version": "1.0",
     "environments": {
-      "pr_validation": {
+      "dont_exists_environment": {
         "enabled": true,
         "require_repo_environment": true,
         "rules": {
