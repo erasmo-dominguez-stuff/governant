@@ -118,14 +118,22 @@ jobs:
           fi
           [ "$SIGNED_OFF" != "true" ] && SIGNED_OFF=false
 
-          # Load repo policy JSON
-          POLICY_PATH=".governant/policies/github_env_protect_policy.json"
+          # Load repo policy JSON (pull-request oriented)
+          POLICY_PATH=".governant/policies/github_pull_request_policy.json"
           if [ ! -f "$POLICY_PATH" ]; then
             echo "::error file=$POLICY_PATH::Policy file not found"
             exit 1
           fi
           POLICY_CONTENT="$(cat "$POLICY_PATH")"
           POLICY_ENVS_JSON="$(echo "$POLICY_CONTENT" | jq -c '.policy.environments | keys')"
+
+          # --- Resolve default branch mapping ---
+          # If the PR's base ref equals the repository default branch, map to the
+          # 'pr_validation' environment (which enforces repo environment presence,
+          # sign-off and at least 1 approver). Keep label overrides intact.
+          REPO_INFO_RAW="$(get_or "/repos/${REPO}" '{}')"
+          DEFAULT_BRANCH="$(echo "$REPO_INFO_RAW" | jq -r '.default_branch // ""')"
+          IS_DEFAULT_PR="false"
 
           # Resolve environment: label > policy.allowed_branches > single env in policy
           ENV_FROM_LABEL="$(
@@ -158,7 +166,12 @@ jobs:
           done < <(echo "$POLICY_CONTENT" | jq -r '.policy.environments | keys[]')
 
           if [ -n "$ENV_FROM_LABEL" ]; then
+            # Label explicitly sets environment; it wins
             ENVIRONMENT="$ENV_FROM_LABEL"
+          elif [ "$BASE_REF" = "$DEFAULT_BRANCH" ] && echo "$POLICY_ENVS_JSON" | jq -e --arg e "pr_validation" 'index($e) != null' >/dev/null 2>&1; then
+            # PR targets the repository default branch; map to 'pr_validation' if defined
+            ENVIRONMENT="pr_validation"
+            IS_DEFAULT_PR="true"
           elif [ -n "$ENV_FROM_POLICY" ]; then
             ENVIRONMENT="$ENV_FROM_POLICY"
           elif [ "$(echo "$POLICY_ENVS_JSON" | jq 'length')" -eq 1 ]; then
@@ -174,9 +187,11 @@ jobs:
             exit 1
           }
 
-          if [ "$(echo "$REPO_ENVS" | jq 'length')" -gt 0 ]; then
+          # Enforce repository environment existence only for default-branch PRs
+          if [ "$IS_DEFAULT_PR" = "true" ]; then
+            # For default-branch PRs we require the environment to be present in repo settings
             echo "$REPO_ENVS" | jq -e --arg env "$ENVIRONMENT" 'index($env) != null' >/dev/null 2>&1 || {
-              echo "::error::Environment '$ENVIRONMENT' is not configured in repository settings."
+              echo "::error::Environment '$ENVIRONMENT' is not configured in repository settings. Default-branch PRs require the environment to exist in the repo settings."
               exit 1
             }
           fi

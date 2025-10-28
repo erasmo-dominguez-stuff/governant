@@ -2,16 +2,16 @@
   "policy": {
     "version": "1.0",
     "environments": {
-      "pr_validation": {
+      "not_existing_environment": {
         "enabled": true,
-        "require_repo_environment": false,
+        "require_repo_environment": true,
         "rules": {
           "allowed_branches": ["main", "feature/*", "bugfix/*"],
           "approvals_required": 1,
-          "signed_off": false
+          "signed_off": true
         }
       },
-      "dev": {
+      "development": {
         "enabled": true,
         "require_repo_environment": true,
         "rules": {
@@ -29,7 +29,7 @@
           "signed_off": true
         }
       },
-      "prod": {
+      "production": {
         "enabled": true,
         "require_repo_environment": true,
         "rules": {
